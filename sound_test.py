@@ -1,7 +1,7 @@
 from pyo import *
 import os
 
-file_path = "/home/user/Desktop/Music/draw2sound/v1.0/output.wav"
+file_path = os.getcwd() + "/output.wav"
 if os.path.exists(file_path):
     print("The file exists.")
 else:

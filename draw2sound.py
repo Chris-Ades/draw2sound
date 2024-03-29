@@ -1,5 +1,5 @@
 import sys
-from PyQt5.QtWidgets import QApplication, QMainWindow, QAction, QColorDialog, QVBoxLayout, QWidget, QLabel
+from PyQt5.QtWidgets import QApplication, QMainWindow, QAction, QColorDialog, QVBoxLayout, QWidget, QLabel, QPushButton
 from PyQt5.QtGui import QPainter, QPen, QColor, QPainterPath
 from PyQt5.QtCore import Qt
 import numpy as np
@@ -20,22 +20,20 @@ class DrawingPad(QMainWindow):
         self.setWindowTitle('draw2sound')
         self.canvas = Canvas(self)
         self.setCentralWidget(self.canvas)
-        self.createMenuBar()
+        self.createButtons()
         self.show()
 
-    def createMenuBar(self):
-        menubar = self.menuBar()
-        fileMenu = menubar.addMenu('File')
+    def createButtons(self):
+        # Clear Sound button
+        clearButton = QPushButton('Clear', self)
+        clearButton.clicked.connect(self.canvas.clearCanvas)
+        clearButton.setGeometry(10, 10, 100, 30)
+        clearButton.setStyleSheet("background-color: red;")
 
-        clearAction = QAction('Clear', self)
-        clearAction.triggered.connect(self.canvas.clearCanvas)
-        fileMenu.addAction(clearAction)
-
-        playSoundAction = QAction('Play Sound', self)
-        playSoundAction.triggered.connect(self.canvas.playSound)
-        fileMenu.addAction(playSoundAction)
-        
-
+        # Play sound button
+        playSoundButton = QPushButton('Play Sound', self)
+        playSoundButton.clicked.connect(self.canvas.playSound)
+        playSoundButton.setGeometry(120, 10, 100, 30)
 
 class Canvas(QWidget):
     def __init__(self, parent):
@@ -51,7 +49,6 @@ class Canvas(QWidget):
         self.mouse_position_label = QLabel(self)
         self.mouse_position_label.move(10, 10)  
         self.mouse_position_label.setText("Mouse Position: (0, 0)")
-        
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -142,7 +139,6 @@ class Canvas(QWidget):
         file_name = "output.wav"
         signal_int16 = np.int16(waveform * 32767)
         write(file_name, sampling_freq, signal_int16)
-
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
