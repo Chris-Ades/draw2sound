@@ -160,12 +160,12 @@ class Canvas(QWidget):
 
         vol = Midictl(ctlnumber=88, minscale=0, maxscale=1, init=0.2) # Volume ctlr from midi
 
-        env = MidiAdsr(notes["velocity"], attack=0.005, decay=0.1, sustain=0.7, release=rel, mul=vol) # ASDR
+        env = MidiAdsr(notes["velocity"], attack=0.005, decay=0.1, sustain=0.7, release=0.5, mul=vol) # ASDR
 
         transpo = Sig(Bendin(brange=12, scale=1)) # Handle pitch bend
 
         soundR = SfPlayer(file_path, speed=notes["pitch"]*transpo/fund_freq, loop=True, offset=0, interp=2, mul=env, add=0).out(0)
-        soundL = SfPlayer(file_path, speed=notes["pitch"]/fund_freq, loop=True, offset=0, interp=2, mul=env, add=0).out(1)
+        soundL = SfPlayer(file_path, speed=notes["pitch"]*transpo/fund_freq, loop=True, offset=0, interp=2, mul=env, add=0).out(1)
 
         sc = Scope(soundR + soundL) # Show scope
         sp = Spectrum(soundR + soundL) # Show spectrum
