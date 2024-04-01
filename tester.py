@@ -1,42 +1,39 @@
-import numpy as np
-from scipy.signal import lfilter, butter
-import pyaudio
-import matplotlib.pyplot as plt
+from pyo import *
+import time
 
-# Function to apply formant filtering
-def apply_formant_filter(input_signal, formant_freqs, samplerate, gain=1.0):
-    output_signal = np.copy(input_signal)
-    nyquist_freq = samplerate / 2.0
-    for f in formant_freqs:
-        # Normalize formant frequency
-        normalized_freq = f / nyquist_freq
-        # Design formant filter using second-order sections
-        b, a = butter(2, [0.9*normalized_freq, 1.1*normalized_freq], btype='band')
-        output_signal = lfilter(b, a, output_signal) * gain
-    return output_signal
+file_path = os.getcwd() + "/output.wav"
+if os.path.exists(file_path):
+    print("The file exists.")
+else:
+    print("The file does not exist.")
 
-# Read input signal (replace this with your actual signal)
-input_signal = np.random.randn(44100)  # Example random input signal
-samplerate = 44100
+s = Server()
+s.setMidiInputDevice(99)  # Open all input devices.
+s.boot().start()
 
-# Define formant frequencies for 'oooh' sound
-formant_freqs_oooh = [300, 870, 2250, 2450, 3500]
+# Automatically converts MIDI pitches to frequencies in Hz.
+notes = Notein(scale=1)
+notes.keyboard()
 
-# Apply formant filtering
-output_signal = apply_formant_filter(input_signal, formant_freqs_oooh, samplerate)
+vol = Midictl(ctlnumber=88, minscale=0, maxscale=1, init=0.2)
 
-# Play processed signal
-p = pyaudio.PyAudio()
-stream = p.open(format=pyaudio.paFloat32, channels=2, rate=samplerate, output=True)
-stream.write(output_signal.astype(np.float32).tobytes())
-stream.close()
-p.terminate()
+env = MidiAdsr(notes["velocity"], attack=0.005, decay=0.1, sustain=0.7, release=0.5, mul=vol)
+
+# Handle pitch bend
+transpo = Sig(Bendin(brange=12, scale=1))
+
+fund_freq = 440
+print("Fundamental frequency:", fund_freq, "Hz")
+
+# make speed = Notein / actual frequency
+srcR = SfPlayer(file_path, speed=notes["pitch"]*transpo/fund_freq, loop=True, offset=0, interp=2, mul=env, add=0).out(0)
+srcL = SfPlayer(file_path, speed=notes["pitch"]/fund_freq, loop=True, offset=0, interp=2, mul=env, add=0).out(1)
+
+sc = Scope(srcR + srcL)
+sp = Spectrum(srcR + srcL)
 
 
-plt.plot(output_signal)
-plt.title('Waveform')
-plt.show()
+time.sleep(2)
+s.stop()
 
-# file_name = "output.wav"
-# signal_int16 = np.int16(waveform * 32767)
-# write(file_name, sampling_freq, signal_int16)
+s.gui()

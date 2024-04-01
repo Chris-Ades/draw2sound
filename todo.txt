@@ -1,0 +1,15 @@
+
+when you clear sound, delete output.wav 
+
+handle clearing a sound by shutting down pyo server?
+
+show asdr curve
+
+MIDI channel: 1, controller number: 88
+MIDI channel: 1, controller number: 3
+MIDI channel: 1, controller number: 89
+MIDI channel: 1, controller number: 90
+MIDI channel: 1, controller number: 96
+
+add frequency domain drawing
+
