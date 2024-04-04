@@ -22,5 +22,7 @@ def scanner(ctlnum, midichnl):
 
 # Listen to controller input.
 scan = CtlScan2(scanner, toprint=False)
+scan2 = Notein()
+notes = Notein(poly=16, scale=1, first=0, last=127, channel=0, mul=1)
 
 s.gui(locals())
