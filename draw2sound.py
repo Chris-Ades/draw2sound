@@ -1,48 +1,62 @@
 import sys
-from PyQt5.QtWidgets import QApplication, QMainWindow, QAction, QColorDialog, QVBoxLayout, QWidget, QLabel, QPushButton
+from PyQt5.QtWidgets import QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QLabel
+import sys
+from PyQt5.QtWidgets import QApplication, QMainWindow, QAction, QColorDialog, QVBoxLayout, QWidget, QLabel, QPushButton, QMessageBox, QDesktopWidget
 from PyQt5.QtGui import QPainter, QPen, QColor, QPainterPath
 from PyQt5.QtCore import Qt
 import numpy as np
-#import matplotlib.pyplot as plt
 import pyaudio
 from astropy.convolution import convolve, Box1DKernel
 from scipy.io.wavfile import write
 from pyo import *
 
+
 class Draw2SoundGUI(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.initUI()
-
-    # Initialize UI
-    def initUI(self):
-        self.mode = 'time' # will change to 'frequency' or 'XY'
-        self.drawn = False # if true then change 
-
-        self.setGeometry(100, 100, 800, 600)
         self.setWindowTitle('draw2sound')
-        self.canvas = Canvas(self)
-        self.setCentralWidget(self.canvas)
-        self.createButtons()
-        self.show()
+        self.setGeometry(100, 100, 600, 400)
+        self.screen = QDesktopWidget().screenGeometry()
+        self.testv = "test passed"
+        self.screen_width, self.screen_height = self.screen.width(), self.screen.height()
 
-    def createButtons(self):
-        move_x = 100 # adjust x position of buttons
+        self.createTabs()
 
-        # Clear Sound button
-        clearButton = QPushButton('Clear', self)
-        clearButton.clicked.connect(self.canvas.clearCanvas)
-        clearButton.setGeometry(10+move_x, 10, 100, 30)
-        clearButton.setStyleSheet("background-color: red;")
+    def createTabs(self):
+        # Create tab widget
+        self.tab_widget = QTabWidget()
+        self.setCentralWidget(self.tab_widget)
 
-        # Play sound button
-        chooseSoundButton = QPushButton('Choose Sound', self)
-        chooseSoundButton.clicked.connect(self.canvas.chooseSound)
-        chooseSoundButton.setGeometry(120+move_x, 10, 100, 30)
+        # Set style sheet for larger tabs
+        self.tab_widget.setStyleSheet("QTabBar::tab { height: 40px; width: 150px; }")
 
-        # Frequency Mode
+        # Create tabs
+        self.tab1 = QWidget()
+        self.tab2 = QWidget()
 
-class Canvas(QWidget):
+        # Add tabs to tab widget
+        self.tab_widget.addTab(self.tab1, "Time Canvas")
+        self.tab_widget.addTab(self.tab2, "Frequency Canvas")
+
+        # Populate Tab 1
+        layout1 = QVBoxLayout()
+        # Add TimeCanvas widget to tab1
+        self.time_canvas = TimeCanvas(self)
+        layout1.addWidget(self.time_canvas)
+        self.tab1.setLayout(layout1)
+
+        # Populate Tab 2
+        layout2 = QVBoxLayout()
+        label2 = QLabel("This is Tab 2")
+        layout2.addWidget(label2)
+        self.tab2.setLayout(layout2)
+
+    def closeEvent(self, event):
+        self.time_canvas.pyo_server.shutdown()
+        print("shutting down")
+        event.accept()
+
+class TimeCanvas(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
         self.setGeometry(0, 0, 800, 600)
@@ -57,13 +71,34 @@ class Canvas(QWidget):
         self.mouse_position_label.move(10, 10)  
         self.mouse_position_label.setText("Mouse Position: (0, 0)")
 
+        # dsp variables
+        self.file_name = "output.wav" # sample name
+        self.fund_freq = int(220) # arbitrary
+        # boot pyo server receiving all MIDI input devices
+        self.pyo_server = Server()
+        self.pyo_server.setMidiInputDevice(99)  # Open all MIDI input devices.
+        self.pyo_server.boot()
+        self.notes = Notein(poly=16, scale=1, first=0, last=127, channel=0, mul=1) # Receive midi from every channel
+
+        # Play sound button
+        move_x = parent.screen_width
+        self.chooseSoundButton = QPushButton('Choose Sound', self)
+        self.chooseSoundButton.clicked.connect(self.chooseSound)
+        self.chooseSoundButton.setGeometry(move_x-260, 0, 100, 30)
+        #chooseSoundButton.setStyleSheet("background-color: lime;")
+
+        self.clearButton = QPushButton('Clear', self)
+        self.clearButton.clicked.connect(self.clearCanvas)
+        self.clearButton.setGeometry(move_x-130, 0, 100, 30)
+        self.clearButton.setStyleSheet("background-color: red;")
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setPen(self.pen)
         painter.drawPath(self.path)
         
         gridSize = 20  
-        gridColor = Qt.gray  
+        gridColor = Qt.gray
         gridStyle = Qt.DotLine  
    
         painter.setPen(QPen(gridColor, 1, gridStyle))
@@ -96,7 +131,7 @@ class Canvas(QWidget):
                 self.update()
                 self.lastPoint = event.pos()
                 self.add_point(event.pos())
-        
+
     def mouseReleaseEvent(self, event):
         if self.drawingEnabled and event.button() == Qt.LeftButton:
             self.path.lineTo(event.pos())
@@ -110,73 +145,75 @@ class Canvas(QWidget):
         self.x_values = []
         self.y_values = []
 
+        if self.pyo_server.getIsStarted():
+            self.pyo_server.stop()
+            #self.message_box("pyo server stopped")
+            self.chooseSoundButton.setEnabled(True)
+
     def add_point(self, pos):
         self.x_values.append(pos.x() - self.width() / 2)
         self.y_values.append(pos.y() - self.height() / 2)
 
     def chooseSound(self):
-        x = self.x_values 
+        if (self.y_values == []):
+            return
         y = np.array(self.y_values)
-
         max_norm = np.max(np.abs(y))
         wave = y / max_norm
         waveform = y / max_norm
         N = len(wave)
-        fund_freq = int(220)
         duration = 5 # seconds
-        sampling_freq = N*fund_freq 
+        sampling_freq = N*self.fund_freq 
         amplitude = 1
 
         for i in range(duration):
-            for j in range(fund_freq):
+            for j in range(self.fund_freq):
                 waveform = np.concatenate((waveform, wave))
-
         waveform = -1 * amplitude * waveform
-
         # Smooth out the signal
         w = 10 # Points to avg in the smoothing process
         waveform = convolve(waveform, Box1DKernel(w)) # boxcar smoothing
-
         # write waveform to a wav file
-        file_name = "output.wav"
         signal_int16 = np.int16(waveform * 32767)
-        write(file_name, sampling_freq, signal_int16)
+        write(self.file_name, sampling_freq, signal_int16)
 
-        ####################_make below its own function_#############################
-        # Handle MIDI input using PYO
-        file_path = os.getcwd() + "/" + file_name
+        self.start_synth()
 
-        if os.path.exists(file_path):
-            print("The file exists.")
-        else:
-            print("The file does not exist.")
+    def start_synth(self):
+        file_path = os.getcwd() + "/" + self.file_name
+        if (os.path.exists(file_path) == False):
+            self.message_box(file_path + " DNE")
+            return
+        self.chooseSoundButton.setEnabled(False)
+        self.pyo_server.start()
+        vol = Midictl(ctlnumber=0, minscale=0, maxscale=1, init=0.2)
+        atk = Midictl(ctlnumber=1, minscale=0, maxscale=10, init=0.005)
+        rel = Midictl(ctlnumber=2, minscale=0, maxscale=10, init=0.8)
 
-        s = Server()
-        s.setMidiInputDevice(99)  # Open all input devices.
-        s.boot().start()
+        trem_freq = (Midictl(ctlnumber=3, minscale=0, maxscale=35, init=4))
+        lp_cutoff = (Midictl(ctlnumber=4, minscale=1, maxscale=10000, init=10000))
 
-        notes = Notein(scale=1) # Gets MIDI note info
-        notes.keyboard() # Show keyboard if no MIDI hardware
-
-        vol = Midictl(ctlnumber=88, minscale=0, maxscale=1, init=0.2) # Volume ctlr from midi
-
-        env = MidiAdsr(notes["velocity"], attack=0.005, decay=0.1, sustain=0.7, release=0.5, mul=vol) # ASDR
-
+        tremolo = Sine(trem_freq)
+        env = MidiAdsr(self.notes["velocity"], attack=0.05, decay=0.1, sustain=0.7, release=0.8, mul=vol)
         transpo = Sig(Bendin(brange=12, scale=1)) # Handle pitch bend
 
-        soundR = SfPlayer(file_path, speed=notes["pitch"]*transpo/fund_freq, loop=True, offset=0, interp=2, mul=env, add=0).out(0)
-        soundL = SfPlayer(file_path, speed=notes["pitch"]*transpo/fund_freq, loop=True, offset=0, interp=2, mul=env, add=0).out(1)
+        src = SfPlayer(file_path, speed=self.notes["pitch"]*transpo/self.fund_freq, loop=True, offset=0, interp=2, mul=env, add=0).mix()*tremolo
+        lp0 = MoogLP(src.mix(), lp_cutoff).out(0)
+        lp1 = MoogLP(src.mix(), lp_cutoff).out(1)
 
-        sc = Scope(soundR + soundL) # Show scope
-        sp = Spectrum(soundR + soundL) # Show spectrum
+        self.notes.keyboard(wxnoserver=True)
 
-        s.gui()
-
+    def message_box(self, message):
+        msg_box = QMessageBox()
+        msg_box.setText(message)
+        msg_box.exec_()
 
 def main():
     app = QApplication(sys.argv)
     ex = Draw2SoundGUI()
-    ex.showMaximized()  
+    ex.show()
+    #ex.showFullScreen()
+    ex.showMaximized()
     sys.exit(app.exec_())
 
 if __name__ == '__main__':
