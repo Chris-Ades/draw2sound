@@ -24,11 +24,11 @@ trem_freq = (Midictl(ctlnumber=3, minscale=0, maxscale=35, init=4))
 lp_cutoff = (Midictl(ctlnumber=4, minscale=1, maxscale=10000, init=10000))
 #hp_cutoff = (Midictl(ctlnumber=86, minscale=1, maxscale=10000, init=1))
 
-#tremolo = Sine(trem_freq)
+tremolo = Sine(trem_freq)
 env = MidiAdsr(notes["velocity"], attack=0.05, decay=0.1, sustain=0.7, release=0.8, mul=vol) # Controls envelope
 transpo = Sig(Bendin(brange=2, scale=1)) # Handle pitch bend
 
-src = SfPlayer(file_path, speed=notes["pitch"]*transpo/fund_freq, loop=True, offset=0, interp=2, mul=env, add=0).mix()#*tremolo
+src = SfPlayer(file_path, speed=notes["pitch"]*transpo/fund_freq, loop=True, offset=0, interp=2, mul=env, add=0).mix()*tremolo
 #hp = ButHP(src, hp_cutoff)
 lp0 = MoogLP(src.mix(), lp_cutoff).out(0)
 lp1 = MoogLP(src.mix(), lp_cutoff).out(1)
