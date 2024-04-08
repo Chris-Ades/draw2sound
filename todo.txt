@@ -1,9 +1,4 @@
-
-when you clear sound, delete output.wav 
-
-handle clearing a sound by shutting down pyo server?
-
-show asdr curve
+show parameter values
 
 MIDI channel: 1, controller number: 88
 MIDI channel: 1, controller number: 3
@@ -11,5 +6,21 @@ MIDI channel: 1, controller number: 89
 MIDI channel: 1, controller number: 90
 MIDI channel: 1, controller number: 96
 
-add frequency domain drawing
+MIDI channel: 1, controller number: 0
+MIDI channel: 1, controller number: 1
+MIDI channel: 1, controller number: 2
+MIDI channel: 1, controller number: 3
+MIDI channel: 1, controller number: 4
+
+INCREASE FONT SIZE so it looks nice in touch screen
+
+STEPS:
+1) Activate synthesizer in the time tab
+2) Work on Frequency Tab
+    Copy time tab on to frequency tab
+    change drawingpad grid axes to log
+    change drawing pad to handle a spectrum drawing (add zeroes padding, lower x axis, move left y axis, disalow going in to negatives)
+3) Handle showing Scope and Spectrum cleanly
+    
+
 

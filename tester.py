@@ -20,7 +20,7 @@ vol = Midictl(ctlnumber=0, minscale=0, maxscale=1, init=0.2)
 atk = Midictl(ctlnumber=1, minscale=0, maxscale=10, init=0.005)
 rel = Midictl(ctlnumber=2, minscale=0, maxscale=10, init=0.8)
 
-trem_freq = (Midictl(ctlnumber=3, minscale=0, maxscale=35, init=1))
+trem_freq = (Midictl(ctlnumber=3, minscale=0, maxscale=35, init=4))
 lp_cutoff = (Midictl(ctlnumber=4, minscale=1, maxscale=10000, init=10000))
 #hp_cutoff = (Midictl(ctlnumber=86, minscale=1, maxscale=10000, init=1))
 
@@ -45,10 +45,18 @@ sp.setFscaling(True)
 def set_vals():
     env.setRelease(rel.get())
     env.setAttack(atk.get())
-    #tremolo
-    #hipass cutoff
-    #lopass cutoff
 pat = Pattern(set_vals, time=0.1).play()
 
+# Potentialy use Raw MIDI
+# s = Server()
+# s.setMidiInputDevice(99) # opens all devices
+# s.boot()
+# s.start()
+# def event(status, data1, data2):
+#     print(status, data1, data2)
+# a = RawMidi(event)
+# def event(status, data1, data2):
+#     print(status, data1, data2)
+# a = RawMidi(event)
 
 s.gui()

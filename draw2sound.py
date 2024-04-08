@@ -17,7 +17,6 @@ class Draw2SoundGUI(QMainWindow):
         self.setWindowTitle('draw2sound')
         self.setGeometry(100, 100, 600, 400)
         self.screen = QDesktopWidget().screenGeometry()
-        self.testv = "test passed"
         self.screen_width, self.screen_height = self.screen.width(), self.screen.height()
 
         self.createTabs()
@@ -51,10 +50,20 @@ class Draw2SoundGUI(QMainWindow):
         layout2.addWidget(label2)
         self.tab2.setLayout(layout2)
 
+        self.tab_widget.currentChanged.connect(self.tab_changed)
+
     def closeEvent(self, event):
-        self.time_canvas.pyo_server.shutdown()
+        if (self.time_canvas.pyo_server.getIsBooted):
+            self.time_canvas.pyo_server.shutdown()
+
+        
         print("shutting down")
         event.accept()
+
+    def tab_changed(self, index):
+        # Get the index of the currently selected tab
+        current_tab_index = self.tab_widget.currentIndex()
+        print("Tab changed to:", current_tab_index)
 
 class TimeCanvas(QWidget):
     def __init__(self, parent):
@@ -79,6 +88,7 @@ class TimeCanvas(QWidget):
         self.pyo_server.setMidiInputDevice(99)  # Open all MIDI input devices.
         self.pyo_server.boot()
         self.notes = Notein(poly=16, scale=1, first=0, last=127, channel=0, mul=1) # Receive midi from every channel
+        self.sc = 0 #initialize scope value
 
         # Play sound button
         move_x = parent.screen_width
@@ -147,7 +157,6 @@ class TimeCanvas(QWidget):
 
         if self.pyo_server.getIsStarted():
             self.pyo_server.stop()
-            #self.message_box("pyo server stopped")
             self.chooseSoundButton.setEnabled(True)
 
     def add_point(self, pos):
@@ -201,7 +210,18 @@ class TimeCanvas(QWidget):
         lp0 = MoogLP(src.mix(), lp_cutoff).out(0)
         lp1 = MoogLP(src.mix(), lp_cutoff).out(1)
 
-        self.notes.keyboard(wxnoserver=True)
+        def set_vals():
+            env.setRelease(rel.get())
+            env.setAttack(atk.get())
+        pat = Pattern(set_vals, time=0.1).play()
+
+        sc = Scope(lp0)
+        sc.view(title="Scope", wxnoserver=True)
+        #self.notes.keyboard(wxnoserver=True)
+         #.view(title="Scope", wxnoserver=True)
+
+    def show_scope(self):
+        self.sc.view(title="Scope", wxnoserver=True)
 
     def message_box(self, message):
         msg_box = QMessageBox()

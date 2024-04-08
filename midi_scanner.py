@@ -25,4 +25,26 @@ scan = CtlScan2(scanner, toprint=False)
 scan2 = Notein()
 notes = Notein(poly=16, scale=1, first=0, last=127, channel=0, mul=1)
 
+
+# These functions are called when Notein receives a MIDI note event.
+def noteon(voice):
+    "Print pitch and velocity for noteon event."
+    pit = int(notes["pitch"].get(all=True)[voice])
+    vel = int(notes["velocity"].get(all=True)[voice] * 127)
+    print("Noteon: voice = %d, pitch = %d, velocity = %d" % (voice, pit, vel))
+
+
+def noteoff(voice):
+    "Print pitch and velocity for noteoff event."
+    pit = int(notes["pitch"].get(all=True)[voice])
+    vel = int(notes["velocity"].get(all=True)[voice] * 127)
+    print("Noteoff: voice = %d, pitch = %d, velocity = %d" % (voice, pit, vel))
+
+
+# TrigFunc calls a function when it receives a trigger. Because notes["trigon"]
+# contains 10 streams, there will be 10 caller, each one with its own argument,
+# taken from the list of integers given at `arg` argument.
+tfon = TrigFunc(notes["trigon"], noteon, arg=list(range(10)))
+tfoff = TrigFunc(notes["trigoff"], noteoff, arg=list(range(10)))
+
 s.gui(locals())
