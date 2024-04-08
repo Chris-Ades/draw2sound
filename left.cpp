@@ -52,15 +52,18 @@ long history1Sum = 0;
 long history2Sum = 0;
 long history3Sum = 0;
 enum analogType { dial1, dial2, dial3, fader1, fader2, ctrl };
-bool shift, ctrlMode, modMode;
+bool shift, ctrlMode, modMode, rw_midi;
 
 // Translates matrix position (index) to key number (value)
 uint8_t keyTranslation[24] = {20, 19, 18, 17, 16, 15, 21, 22, 23, 12, 13, 14,
                               8,  7,  6,  5,  4,  3,  9,  10, 11, 0,  1,  2};
 uint8_t rwKeys = 12;
+uint8_t last_rw = 0; // last index of rootwheel, so when baseFreq is changed,
+                     // rootFreq can be changed
+// without pressing the rw button again
 
-uint16_t baseFreq = 262; // C4
-uint16_t rootFreq = 262;
+float baseFreq = 261.626; // C4
+float rootFreq = 261.626;
 uint8_t numKeys = 13;
 union { // union type my beloved
   float f;
@@ -70,6 +73,7 @@ uint16_t mask = 0x1FFF; // 13 bits
 
 int8_t channels[16] = {-1};
 uint8_t volume = 127; // This is encoded in the velocity
+char sendStr[61];
 
 static uint32_t blink_interval_ms = BLINK_NOT_MOUNTED;
 
@@ -192,6 +196,17 @@ void setup_i2c() {
   i2c_init(i2c0, I2C_BAUDRATE);
 }
 
+void print_sysex(int len) {
+  if (len > 61)
+    return;
+  uint8_t msg[64];
+  msg[0] = 0b11110000;
+  msg[1] = 0b01010101;
+  memcpy(&msg[2], sendStr, len);
+  msg[len + 2] = 0b11110111;
+  tud_midi_stream_write(0, msg, len + 3);
+}
+
 void read_right() {
   uint8_t buf[5];
   buf[0] = 0; // Read from address zero
@@ -206,9 +221,10 @@ void read_right() {
 
 void write_right() { // this name is vague on purpose. sorry not sorry :3
   uint8_t buf[10];
-  buf[0] = 2;             // address we are writing to
-  buf[1] = baseFreq >> 8; // Big endian uint16
-  buf[2] = baseFreq & 0xFF;
+  buf[0] = 2; // address we are writing to
+  uint16_t roundBaseFreq = roundf(baseFreq);
+  buf[1] = roundBaseFreq >> 8; // Big endian uint16
+  buf[2] = roundBaseFreq & 0xFF;
   buf[3] = numKeys;
   for (int i = 0; i < 4; i++)
     buf[4 + i] = ratio.bytes[i];
@@ -251,7 +267,8 @@ void read_local() {
 }
 
 void write_freq(float freq, uint8_t chan) {
-  printf("Writing freq %f\n", freq);
+  // printf("Writing freq %f\n", freq);
+  // print_sysex(sprintf(sendStr, "%.15f", freq));
   uint8_t msg[3];
   float note = 12 * log2(freq / 440) + 69; // Frequency to midi note
   int8_t baseNote = roundf(note);          // We encode the note as midi + bend
@@ -282,30 +299,45 @@ void off_freq(uint8_t chan) {
 
   channels[chan] = -1;
 }
+void change_freq(int rw_index) {
+  if (rw_index >= 0) {
+    last_rw = rw_index;
+  }
+  rootFreq = baseFreq / pow(1.05946309436,
+                            ((keyTranslation[last_rw] *
+                              5) % // is the ratio here related to rw_keys?
+                             12)); // 12 would be reduced. bounce around order
+  if (last_rw > 11) {
+    rootFreq *= 2;
+  }
+  for (int i = 0; i < 13; i++) {
+    bool oldBit = (oldRight >> i) & 1;
+    if (oldBit) {
+      // print_sysex(sprintf(sendStr, "%d", i));
+      off_freq(i);
+      write_freq(rootFreq * pow(ratio.f, i), i);
+    }
+  }
+}
 
 void check_notes() {
-  // I'm assuming that bits 23-12 are the outside buttons starting from 9
-  // o'clock and 11-0 are the inside with the same pattern
   if (oldLeft != left) {
     for (int i = 0; i < 24; i++) {
       bool oldbit = (oldLeft >> i) & 1;
       bool newbit = (left >> i) & 1;
-      if (!oldbit && newbit) {
-        rootFreq =
-            baseFreq /
-            pow(ratio.f, ((keyTranslation[i] * 5) %
-                          12)); // 12 would be reduced. bounce around order
-        if (i > 11) {
-          rootFreq *= pow(ratio.f, 12);
-        }
-        for (int i = 0; i < 13; i++) {
-          bool oldBit = (oldRight >> i) & 1;
-          if (oldBit) {
-            off_freq(i);
-            write_freq(rootFreq * pow(ratio.f, i), i);
-          }
-        }
+      if (shift && (i == 20)) { 
+        rw_midi = newbit;
       }
+      if (!oldbit && newbit) {
+        //print_sysex(sprintf(sendStr, "%d", i));
+        change_freq(i);
+		if(rw_midi){
+			write_freq(rootFreq,15);
+		}
+      }
+	  if (oldbit && !newbit){
+		off_freq(15);
+	  }
     }
   }
   if (oldRight != right) {
@@ -342,19 +374,20 @@ void check_analog() {
   } else {
     ctrlMode = analog[fader1] > 64;
 
-    //Scales 0-127 to 0-13
-	numKeys = roundf(analog[dial3] / 9.7692307692);
-    //Simple LED mask for rn
-	mask = 0x1FFF >> (13 - numKeys);
-    //This is kinda bs, should we do it by multiplication?
-	baseFreq = 262 + analog[dial2] * 2;
-	// Scales 0-127 to 0-13
-	rwKeys = roundf(analog[dial1] / 10.5833333333);
-	modMode = (analog[fader2] > 64) && (numKeys == rwKeys);
-	if (rwKeys == 13) {
-		ratio.f = 1.05946309436;
+    // Scales 0-127 to 0-13
+    numKeys = roundf(analog[dial3] / 9.7692307692);
+    // Simple LED mask for rn
+    mask = 0x1FFF >> (13 - numKeys);
+    // This is kinda bs, should we do it by multiplication?
+    baseFreq = 261.626 + analog[dial2] * 2;
+    change_freq(-1); //this spams midi messages
+    // Scales 0-127 to 0-13
+    rwKeys = roundf(analog[dial1] / 10.5833333333);
+    modMode = (analog[fader2] > 64) && (numKeys == rwKeys);
+    if (numKeys == 13) {
+      ratio.f = 1.05946309436;
     } else {
-      ratio.f = pow(2, 1.0 / rwKeys);
+      ratio.f = pow(2, 1.0 / numKeys);
     }
   }
 }
