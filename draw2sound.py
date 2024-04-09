@@ -10,6 +10,11 @@ from astropy.convolution import convolve, Box1DKernel
 from scipy.io.wavfile import write
 from pyo import *
 
+import platform
+import subprocess
+import os
+
+from d2s_synth import Synth
 
 class Draw2SoundGUI(QMainWindow):
     def __init__(self):
@@ -39,8 +44,7 @@ class Draw2SoundGUI(QMainWindow):
 
         # Populate Tab 1
         layout1 = QVBoxLayout()
-        # Add TimeCanvas widget to tab1
-        self.time_canvas = TimeCanvas(self)
+        self.time_canvas = Canvas(self, 'time')
         layout1.addWidget(self.time_canvas)
         self.tab1.setLayout(layout1)
 
@@ -55,7 +59,7 @@ class Draw2SoundGUI(QMainWindow):
     def closeEvent(self, event):
         if (self.time_canvas.pyo_server.getIsBooted):
             self.time_canvas.pyo_server.shutdown()
-
+            #also shut down all Scope, Spectrum, Keyboard windows
         
         print("shutting down")
         event.accept()
@@ -65,9 +69,11 @@ class Draw2SoundGUI(QMainWindow):
         current_tab_index = self.tab_widget.currentIndex()
         print("Tab changed to:", current_tab_index)
 
-class TimeCanvas(QWidget):
-    def __init__(self, parent):
+class Canvas(QWidget):
+    def __init__(self, parent, domain):
         super().__init__(parent)
+        self.domain = domain # time or frequency
+
         self.setGeometry(0, 0, 800, 600)
         self.setMouseTracking(True)
         self.drawingEnabled = True 
@@ -80,27 +86,41 @@ class TimeCanvas(QWidget):
         self.mouse_position_label.move(10, 10)  
         self.mouse_position_label.setText("Mouse Position: (0, 0)")
 
-        # dsp variables
         self.file_name = "output.wav" # sample name
-        self.fund_freq = int(220) # arbitrary
-        # boot pyo server receiving all MIDI input devices
+
         self.pyo_server = Server()
-        self.pyo_server.setMidiInputDevice(99)  # Open all MIDI input devices.
+        self.pyo_server.setMidiInputDevice(99)
         self.pyo_server.boot()
-        self.notes = Notein(poly=16, scale=1, first=0, last=127, channel=0, mul=1) # Receive midi from every channel
-        self.sc = 0 #initialize scope value
+        self.notes = Notein(poly=16, scale=1, first=0, last=127, channel=0, mul=1)
 
         # Play sound button
         move_x = parent.screen_width
         self.chooseSoundButton = QPushButton('Choose Sound', self)
         self.chooseSoundButton.clicked.connect(self.chooseSound)
         self.chooseSoundButton.setGeometry(move_x-260, 0, 100, 30)
-        #chooseSoundButton.setStyleSheet("background-color: lime;")
+        self.chooseSoundButton.setEnabled(False)
 
         self.clearButton = QPushButton('Clear', self)
         self.clearButton.clicked.connect(self.clearCanvas)
         self.clearButton.setGeometry(move_x-130, 0, 100, 30)
         self.clearButton.setStyleSheet("background-color: red;")
+
+        self.scopeButton = QPushButton('Scope', self)
+        self.scopeButton.clicked.connect(self.show_scope)
+        self.scopeButton.setGeometry(move_x-390, 0, 100, 30)
+        self.scopeButton.setEnabled(False)
+
+        self.spectrumButton = QPushButton('Spectrum', self)
+        self.spectrumButton.clicked.connect(self.show_spectrum)
+        self.spectrumButton.setGeometry(move_x-520, 0, 100, 30)
+        self.spectrumButton.setEnabled(False)
+
+        self.keyboardButton = QPushButton('Keyboard', self)
+        self.keyboardButton.clicked.connect(self.show_keyboard)
+        self.keyboardButton.setGeometry(move_x-650, 0, 100, 30)
+        self.keyboardButton.setEnabled(False)
+
+        
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -144,6 +164,7 @@ class TimeCanvas(QWidget):
 
     def mouseReleaseEvent(self, event):
         if self.drawingEnabled and event.button() == Qt.LeftButton:
+            self.chooseSoundButton.setEnabled(True)
             self.path.lineTo(event.pos())
             self.update()
             self.drawingEnabled = False 
@@ -155,78 +176,94 @@ class TimeCanvas(QWidget):
         self.x_values = []
         self.y_values = []
 
+        self.chooseSoundButton.setEnabled(False)
+        self.scopeButton.setEnabled(False)
+        self.spectrumButton.setEnabled(False)
+        self.keyboardButton.setEnabled(False)
+
         if self.pyo_server.getIsStarted():
+            self.a.stop()
             self.pyo_server.stop()
-            self.chooseSoundButton.setEnabled(True)
 
     def add_point(self, pos):
         self.x_values.append(pos.x() - self.width() / 2)
         self.y_values.append(pos.y() - self.height() / 2)
 
     def chooseSound(self):
-        if (self.y_values == []):
-            return
-        y = np.array(self.y_values)
-        max_norm = np.max(np.abs(y))
-        wave = y / max_norm
-        waveform = y / max_norm
-        N = len(wave)
-        duration = 5 # seconds
-        sampling_freq = N*self.fund_freq 
-        amplitude = 1
+        # Handle time domain sound maker
+        if self.domain == "time":
+            if (self.y_values == []):
+                return
+            y = np.array(self.y_values)
+            max_norm = np.max(np.abs(y))
+            wave = y / max_norm
+            waveform = y / max_norm
+            N = len(wave)
+            duration = 5 # seconds
+            fund_freq = int(220)
+            sampling_freq = N*fund_freq 
+            amplitude = 1
 
-        for i in range(duration):
-            for j in range(self.fund_freq):
-                waveform = np.concatenate((waveform, wave))
-        waveform = -1 * amplitude * waveform
-        # Smooth out the signal
-        w = 10 # Points to avg in the smoothing process
-        waveform = convolve(waveform, Box1DKernel(w)) # boxcar smoothing
-        # write waveform to a wav file
-        signal_int16 = np.int16(waveform * 32767)
-        write(self.file_name, sampling_freq, signal_int16)
+            for i in range(duration):
+                for j in range(fund_freq):
+                    waveform = np.concatenate((waveform, wave))
+            waveform = -1 * amplitude * waveform
+            # Smooth out the signal
+            w = 10 # Points to avg in the smoothing process
+            waveform = convolve(waveform, Box1DKernel(w)) # boxcar smoothing
+            # write waveform to a wav file
+            signal_int16 = np.int16(waveform * 32767)
+            write(self.file_name, sampling_freq, signal_int16)
 
-        self.start_synth()
+            self.pyo_server.start()
+            self.start_synth(fund_freq)
 
-    def start_synth(self):
+            self.chooseSoundButton.setEnabled(False)
+            self.scopeButton.setEnabled(True)
+
+            self.spectrumButton.setEnabled(True)
+            self.keyboardButton.setEnabled(True)    
+
+    def start_synth(self, fund_freq):
         file_path = os.getcwd() + "/" + self.file_name
         if (os.path.exists(file_path) == False):
             self.message_box(file_path + " DNE")
             return
-        self.chooseSoundButton.setEnabled(False)
-        self.pyo_server.start()
-        vol = Midictl(ctlnumber=0, minscale=0, maxscale=1, init=0.2)
-        atk = Midictl(ctlnumber=1, minscale=0, maxscale=10, init=0.005)
-        rel = Midictl(ctlnumber=2, minscale=0, maxscale=10, init=0.8)
 
-        trem_freq = (Midictl(ctlnumber=3, minscale=0, maxscale=35, init=4))
-        lp_cutoff = (Midictl(ctlnumber=4, minscale=1, maxscale=10000, init=10000))
-
-        tremolo = Sine(trem_freq)
-        env = MidiAdsr(self.notes["velocity"], attack=0.05, decay=0.1, sustain=0.7, release=0.8, mul=vol)
-        transpo = Sig(Bendin(brange=12, scale=1)) # Handle pitch bend
-
-        src = SfPlayer(file_path, speed=self.notes["pitch"]*transpo/self.fund_freq, loop=True, offset=0, interp=2, mul=env, add=0).mix()*tremolo
-        lp0 = MoogLP(src.mix(), lp_cutoff).out(0)
-        lp1 = MoogLP(src.mix(), lp_cutoff).out(1)
-
-        def set_vals():
-            env.setRelease(rel.get())
-            env.setAttack(atk.get())
-        pat = Pattern(set_vals, time=0.1).play()
-
-        sc = Scope(lp0)
-        sc.view(title="Scope", wxnoserver=True)
-        #self.notes.keyboard(wxnoserver=True)
-         #.view(title="Scope", wxnoserver=True)
+        self.a = Synth(file_path, fund_freq, self.notes)
+        self.a.out()
 
     def show_scope(self):
+        #checks if there is a Scope window already open
+        self.sc = Scope(self.a.sig())
         self.sc.view(title="Scope", wxnoserver=True)
+    
+    def show_spectrum(self):
+        #checks if there is a Scope window already open
+        self.sp = Spectrum(self.a.sig())
+        #self.sp.setSize(4096)
+        #self.sp.setFscaling(True)
+        self.sp.view(title="Spectrum", wxnoserver=True)
+    
+    def show_keyboard(self):
+        #checks if there is a Scope window already open
+        self.notes.keyboard(title="Keyboard", wxnoserver=True)
 
     def message_box(self, message):
         msg_box = QMessageBox()
         msg_box.setText(message)
         msg_box.exec_()
+
+    # def close_window(self, window_title):
+    #     system = platform.system()
+    #     if system == 'Windows':
+    #         os.system(f'taskkill /f /im "{window_title}"')
+    #     elif system == 'Darwin':  # macOS
+    #         os.system(f"osascript -e 'tell application \"System Events\" to delete (every window whose name is \"{window_title}\")'")
+    #     elif system == 'Linux':
+    #         subprocess.run(['xdotool', 'search', '--name', window_title, 'windowkill'])
+    #     else:
+    #         print("Unsupported operating system")
 
 def main():
     app = QApplication(sys.argv)
