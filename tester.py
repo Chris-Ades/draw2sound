@@ -26,7 +26,7 @@ lp_cutoff = (Midictl(ctlnumber=4, minscale=1, maxscale=10000, init=10000))
 
 tremolo = Sine(trem_freq)
 env = MidiAdsr(notes["velocity"], attack=0.05, decay=0.1, sustain=0.7, release=0.8, mul=vol) # Controls envelope
-transpo = Sig(Bendin(brange=12, scale=1)) # Handle pitch bend
+transpo = Sig(Bendin(brange=2, scale=1)) # Handle pitch bend
 
 src = SfPlayer(file_path, speed=notes["pitch"]*transpo/fund_freq, loop=True, offset=0, interp=2, mul=env, add=0).mix()*tremolo
 #hp = ButHP(src, hp_cutoff)
