@@ -192,6 +192,9 @@ class Canvas(QWidget):
         self.pyo_server = parent.pyo_server
         self.notes = parent.notes
 
+        self.counter_a = 0
+        self.counter_b = 0
+
         move_x = self.width()
         self.chooseSoundButton = QPushButton('Choose Sound', self)
         self.chooseSoundButton.clicked.connect(self.chooseSound)
@@ -224,7 +227,7 @@ class Canvas(QWidget):
             painter.setPen(self.pen)
             painter.drawPath(self.path)
             
-            gridSize = 20  
+            gridSize = 40
             gridColor = Qt.gray
             gridStyle = Qt.DotLine  
     
@@ -236,12 +239,18 @@ class Canvas(QWidget):
             for j in range(0, self.width() // 2, gridSize):
                 painter.drawLine(self.width() // 2 + j, 0, self.width() // 2 + j, self.height())
                 painter.drawLine(self.width() // 2 - j, 0, self.width() // 2 - j, self.height())
-                
+
             centerLineThickness = 2  
             painter.setPen(QPen(Qt.gray, centerLineThickness, Qt.SolidLine))
             painter.drawLine(0, self.height() // 2, self.width(), self.height() // 2)
             painter.drawLine(self.width() // 2, 0, self.width() // 2, self.height())
-        
+            
+            painter.setFont(QFont("Arial", 12))
+            painter.setPen(self.pen)
+            painter.drawText(self.width() // 2, self.height() // 2, "0")
+            painter.drawText(10, self.height() // 2, "-T/2")
+            painter.drawText(self.width(), self.height() // 2, "T/2")
+
         if self.domain == "frequency":
             painter = QPainter(self)
             painter.setFont(QFont("Arial", 12))
@@ -251,7 +260,7 @@ class Canvas(QWidget):
             gridSize = 20  
             gridColor = Qt.gray
             gridStyle = Qt.DotLine  
-    
+
             painter.setPen(QPen(gridColor, 1, gridStyle))
             for i in range(0, self.height() // 2, gridSize):
                 painter.drawLine(0, self.height() // 2 + i, self.width(), self.height() // 2 + i)
@@ -359,7 +368,7 @@ class Canvas(QWidget):
             self.update()
 
         if self.pyo_server.getIsStarted():
-            self.a.stop()
+            self.sound.stop()
             self.pyo_server.stop()
 
     def add_point(self, pos):
@@ -381,7 +390,7 @@ class Canvas(QWidget):
             N = len(wave)
             print(N)
             duration = 5 # seconds
-            fund_freq = int(220)
+            fund_freq = int(200)
             sampling_freq = N*fund_freq 
             amplitude = 1
 
@@ -394,7 +403,7 @@ class Canvas(QWidget):
             waveform = convolve(waveform, Box1DKernel(w))
             signal_int16 = np.int16(waveform * 32767)
             write(self.file_name, sampling_freq, signal_int16)
-            self.show_fft(waveform, sampling_freq)
+            #self.show_fft(waveform, sampling_freq)
             self.pyo_server.start()
             self.start_synth(fund_freq, loop=True)
             self.chooseSoundButton.setEnabled(False)
@@ -435,7 +444,6 @@ class Canvas(QWidget):
             self.scopeButton.setEnabled(True)
             self.spectrumButton.setEnabled(True)
             self.keyboardButton.setEnabled(True)   
-            
 
     def start_synth(self, fund_freq, loop):
         file_path = os.getcwd() + "/" + self.file_name
@@ -443,22 +451,23 @@ class Canvas(QWidget):
             self.message_box(file_path + " DNE")
             return
 
-        self.a = D2S_synth(file_path, fund_freq, self.notes, loop)
-        self.a.out()
-
-        self.sc = Scope(self.a.sig())
-        self.sp = Spectrum(self.a.sig())
+        self.sound = D2S_synth(file_path, fund_freq, self.notes, loop)
+        self.sound.out()
 
     def show_scope(self):
+        if self.counter_a == 0:
+            self.sc = Scope(self.sound.sig())
+            self.sc.setGain(5)
+        self.counter_a += 1
         self.sc.view(title="Scope", wxnoserver=True)
-        #del self.sc
-        
     
     def show_spectrum(self):
-        self.sp.setSize(4096)
-        self.sp.setFscaling(True)
+        if self.counter_b == 0:
+            self.sp = Spectrum(self.sound.sig())
+            self.sp.setSize(4096)
+            self.sp.setFscaling(True)
+        self.counter_b += 1
         self.sp.view(title="Spectrum", wxnoserver=True)
-        #del self.sp
     
     def show_keyboard(self):
         self.notes.keyboard(title="Keyboard", wxnoserver=True)

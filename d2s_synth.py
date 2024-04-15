@@ -35,15 +35,13 @@ class D2S_synth:
     def out(self):
         self.comp0.out(0)
         self.comp1.out(1)
-        self.lp0.out(0)
-        self.lp1.out(1)
     
     def stop(self):
         self.comp0.stop()
         self.comp1.stop()
 
     def sig(self):
-        return (self.src).mix()
+        return (self.lp0).mix()
 
 
 
