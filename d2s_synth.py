@@ -35,10 +35,16 @@ class D2S_synth:
     def out(self):
         self.comp0.out(0)
         self.comp1.out(1)
-    
+
     def stop(self):
         self.comp0.stop()
         self.comp1.stop()
+        self.lp0.stop()
+    
+    def start(self):
+        self.comp0.play()
+        self.comp1.play()
+        self.lp0.play()
 
     def sig(self):
         return (self.lp0).mix()

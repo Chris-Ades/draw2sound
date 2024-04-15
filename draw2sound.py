@@ -34,7 +34,7 @@ class Draw2SoundGUI(QMainWindow):
         self.createTabs()
         self.createMenu()
 
-        #self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnBottomHint)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnBottomHint)
 
     def createTabs(self):
         self.tab_widget = QTabWidget()
@@ -452,6 +452,7 @@ class Canvas(QWidget):
             return
 
         self.sound = D2S_synth(file_path, fund_freq, self.notes, loop)
+        self.sound.start()
         self.sound.out()
 
     def show_scope(self):

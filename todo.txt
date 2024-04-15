@@ -1,26 +1,28 @@
-show parameter values
-
-MIDI channel: 1, controller number: 88
-MIDI channel: 1, controller number: 3
-MIDI channel: 1, controller number: 89
-MIDI channel: 1, controller number: 90
-MIDI channel: 1, controller number: 96
-
 MIDI channel: 1, controller number: 0
 MIDI channel: 1, controller number: 1
 MIDI channel: 1, controller number: 2
 MIDI channel: 1, controller number: 3
 MIDI channel: 1, controller number: 4
 
-INCREASE FONT SIZE so it looks nice in touch screen
+Other:
+0)  *INSTEAD OF INSTANTIATING A NEW D2S_SYNTH EVERYTHING YOU CHOOSE A SOUND, JUST setPath of the SfPlayer
+    *figure out a way so that there only one d2s_synth active in the whole program, one scope object and one spectrum object.
+    *remember, all you're doing is changing the wav file
+1) make sure pitch bend transposition work with modmatic, and make sure the correct knobs are log scaled
+2) INCREASE FONT SIZE so it looks nice in touch screen
+3) When a sound is chosen have it be able to show it in both modes (it "chooses" it in both modes)
+4) Show parameter values
+5) Make buttons move with changing window size 
 
-STEPS:
-1) Activate synthesizer in the time tab
-2) Work on Frequency Tab
-    Copy time tab on to frequency tab
-    change drawingpad grid axes to log
-    change drawing pad to handle a spectrum drawing (add zeroes padding, lower x axis, move left y axis, disalow going in to negatives)
-3) Handle showing Scope and Spectrum cleanly
-    
+Time Tab:
+1) add axes labels
+2) Interpolate and increase samples
+3) add presets for sine, square, triangle, saw
+
+Freq Tab:
+1) add presets for [xentonal timbres] email the dude about that
+2) add axes labels
+3) Lift x-axis to show negative
+4) Aadd a zoom feature
 
 
