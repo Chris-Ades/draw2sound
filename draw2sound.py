@@ -34,6 +34,8 @@ class Draw2SoundGUI(QMainWindow):
         self.createTabs()
         self.createMenu()
 
+        #self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnBottomHint)
+
     def createTabs(self):
         self.tab_widget = QTabWidget()
         self.setCentralWidget(self.tab_widget)
@@ -57,34 +59,104 @@ class Draw2SoundGUI(QMainWindow):
     
     def createMenu(self):
         presets_menu = self.menuBar().addMenu("Presets")
+
+        sine_action = QAction("Sine", self)
+        sine_action.triggered.connect(self.add_sine_preset)
+        presets_menu.addAction(sine_action)
+
         square_action = QAction("Square", self)
         square_action.triggered.connect(self.add_square_preset)
         presets_menu.addAction(square_action)
+
+        triangle_action = QAction("Triangle", self)
+        triangle_action.triggered.connect(self.add_triangle_preset)
+        presets_menu.addAction(triangle_action)
+
+        saw_action = QAction("Saw", self)
+        saw_action.triggered.connect(self.add_saw_preset)
+        presets_menu.addAction(saw_action)
+
+        # ten_edo_action = QAction("10 edo", self)
+        # ten_edo_action.triggered.connect(self.add_10edo_preset)
+        # presets_menu.addAction(ten_edo_action)
+
         if self.tab_widget.currentIndex() == 1:
             pass
 
+    def add_sine_preset(self):
+        if self.tab_widget.currentIndex() == 1: # for frequency mode
+            self.frequency_canvas.position = []
+            
+            fundamental_freq = 100
+            amplitude = 1
+            self.frequency_canvas.position.append((self.frequency_canvas.x_transform_inverse(fundamental_freq), self.frequency_canvas.y_transform_inverse(amplitude)))
+            
+            self.frequency_canvas.update()
+            self.frequency_canvas.chooseSoundButton.setEnabled(True)
+
     def add_square_preset(self):
-        if self.tab_widget.currentIndex() == 1:
+        if self.tab_widget.currentIndex() == 1: # for frequency mode
             self.frequency_canvas.position = []
             
             num_terms = 400
             fundamental_freq = 100
             for n in range(1, num_terms + 1):
-                amplitude = 4 / (n * np.pi)
+                if n % 2 == 1:
+                    amplitude = 4 / (n * np.pi)
+                    frequency = n * fundamental_freq
+                    self.frequency_canvas.position.append((self.frequency_canvas.x_transform_inverse(frequency), self.frequency_canvas.y_transform_inverse(amplitude)))
+
+            self.frequency_canvas.update()
+            self.frequency_canvas.chooseSoundButton.setEnabled(True)
+
+    def add_triangle_preset(self):
+        if self.tab_widget.currentIndex() == 1:
+            self.frequency_canvas.position = []
+
+            num_terms = 400
+            fundamental_freq = 100
+            for n in range(1, num_terms + 1):
+                if n % 2 == 1:
+                    amplitude = (8 / (np.pi**2 * (n**2))) * (-1)**((n-1)/2)
+                    frequency = n * fundamental_freq
+                    self.frequency_canvas.position.append((self.frequency_canvas.x_transform_inverse(frequency), self.frequency_canvas.y_transform_inverse(amplitude)))
+
+            self.frequency_canvas.update()
+            self.frequency_canvas.chooseSoundButton.setEnabled(True)
+
+    def add_saw_preset(self):
+        if self.tab_widget.currentIndex() == 1:
+            self.frequency_canvas.position = []
+
+            num_terms = 400
+            fundamental_freq = 100
+            for n in range(1, num_terms + 1):
+                amplitude = 1 / n  
                 frequency = n * fundamental_freq
                 self.frequency_canvas.position.append((self.frequency_canvas.x_transform_inverse(frequency), self.frequency_canvas.y_transform_inverse(amplitude)))
 
             self.frequency_canvas.update()
             self.frequency_canvas.chooseSoundButton.setEnabled(True)
 
+    def add_10edo_preset(self):
+        if self.tab_widget.currentIndex() == 1:
+            self.frequency_canvas.position = []
+ 
+            b = 2**(1/10)
+            f = 100
+            data_points = [(f, 1), (f*b**10, 1/2), (f*b**17, 1/3), (f*b**20, 1/4), (f*b**25, 1/5), (f*b**28, 1/6), (f*b**30, 1/7)]
+            for point in data_points:
+                frequency, amplitude = point
+                self.frequency_canvas.position.append((self.frequency_canvas.x_transform_inverse(frequency), self.frequency_canvas.y_transform_inverse(amplitude)))
+
+            self.frequency_canvas.update()
+            self.frequency_canvas.chooseSoundButton.setEnabled(True)
 
     def closeEvent(self, event):
         if (self.time_canvas.pyo_server.getIsBooted):
             self.time_canvas.pyo_server.shutdown()
         print("shutting down")
         event.accept()
-
-    
 
 class Canvas(QWidget):
     def __init__(self, parent, domain):
@@ -280,7 +352,7 @@ class Canvas(QWidget):
             self.x_values = []
             self.y_values = []
             self.parent.tab_widget.setTabEnabled(1, True)
-        
+
         if self.domain == "frequency":
             self.position = []
             self.parent.tab_widget.setTabEnabled(0, True)
@@ -318,13 +390,11 @@ class Canvas(QWidget):
                     waveform = np.concatenate((waveform, wave))
             waveform = -1 * amplitude * waveform
 
-            w = 10 # Points to avg in the smoothing process
+            w = 1 # Points to avg in the smoothing process
             waveform = convolve(waveform, Box1DKernel(w))
             signal_int16 = np.int16(waveform * 32767)
             write(self.file_name, sampling_freq, signal_int16)
-            
-            #self.show_fft(wave, sampling_freq)
-
+            self.show_fft(waveform, sampling_freq)
             self.pyo_server.start()
             self.start_synth(fund_freq, loop=True)
             self.chooseSoundButton.setEnabled(False)
@@ -376,18 +446,19 @@ class Canvas(QWidget):
         self.a = D2S_synth(file_path, fund_freq, self.notes, loop)
         self.a.out()
 
-        # self.sc = Scope(self.a.sig())
-        # self.sp = Spectrum(self.a.sig())
+        self.sc = Scope(self.a.sig())
+        self.sp = Spectrum(self.a.sig())
 
     def show_scope(self):
-        #self.sc.view(title="Scope", wxnoserver=True)
-        return
+        self.sc.view(title="Scope", wxnoserver=True)
+        #del self.sc
+        
     
     def show_spectrum(self):
-        #self.sp.setSize(4096)
-        #self.sp.setFscaling(True)
-        #self.sp.view(title="Spectrum", wxnoserver=True)
-        return
+        self.sp.setSize(4096)
+        self.sp.setFscaling(True)
+        self.sp.view(title="Spectrum", wxnoserver=True)
+        #del self.sp
     
     def show_keyboard(self):
         self.notes.keyboard(title="Keyboard", wxnoserver=True)
