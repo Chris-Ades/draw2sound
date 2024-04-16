@@ -6,6 +6,7 @@ import numpy as np
 import pyaudio
 from astropy.convolution import convolve, Box1DKernel
 from scipy.io.wavfile import write
+from scipy.interpolate import interp1d
 from pyo import *
 
 import platform
@@ -39,8 +40,9 @@ class Canvas(QWidget):
             self.current_drag_point = None
             self.drag_offset = None
             self.diameter = 8
-            self.mag_norm = 0.75*self.height() # scale to screen size
+            self.mag_norm = 0.5*self.height() # scale to screen size
             self.max_x = 1500 
+            self.x_divider = 4/3
 
         self.mouse_position_label = QLabel(self)
         self.mouse_position_label.move(10, 10)  
@@ -129,9 +131,11 @@ class Canvas(QWidget):
                 painter.drawLine(self.width() // 2 + j, 0, self.width() // 2 + j, self.height())
                 painter.drawLine(self.width() // 2 - j, 0, self.width() // 2 - j, self.height())
             
+            centerLineThickness = 2
+            painter.setPen(QPen(Qt.gray, centerLineThickness, Qt.SolidLine))
+            painter.drawLine(0, self.height()/self.x_divider, self.width(), self.height()/self.x_divider)
             centerLineThickness = 4  
             painter.setPen(QPen(Qt.gray, centerLineThickness, Qt.SolidLine))
-            painter.drawLine(0, self.height(), self.width(), self.height())
             painter.drawLine(0, 0, 0, self.height()) 
             
             painter.setPen(self.pen)
@@ -143,7 +147,7 @@ class Canvas(QWidget):
                 painter.drawText(text_position, f"({self.x_transform(x)}, {self.y_transform(y)})")
 
                 painter.setPen(QPen(Qt.black, 2, Qt.SolidLine))
-                painter.drawLine(x, y, x, self.height())
+                painter.drawLine(x, y, x, self.height()/self.x_divider)
 
     def mousePressEvent(self, event):
         if self.domain == "time":
@@ -241,24 +245,25 @@ class Canvas(QWidget):
             self.parent.tab_widget.setTabEnabled(1, False)
             # interpolate values like you did so you can increase sampling frequency
             # scale time domain and add number markers
+            x = np.array(self.x_values)
             y = np.array(self.y_values)
-            max_norm = np.max(np.abs(y))
-            wave = y / max_norm
-            waveform = y / max_norm
-            N = len(wave)
-            print(N)
-            duration = 5 # seconds
-            fund_freq = int(200)
-            sampling_freq = N*fund_freq 
-            amplitude = 1
+            
+            fund_freq = int(220)
+            sampling_freq = int(44000)
+            N = int(sampling_freq / fund_freq)
 
-            for i in range(duration):
-                for j in range(fund_freq):
-                    waveform = np.concatenate((waveform, wave))
-            waveform = -1 * amplitude * waveform
+            interp_func = interp1d(x, y, kind='linear')
+
+            x_resampled = np.linspace(x[0], x[-1], N)
+            y_resampled = interp_func(x_resampled)
+            wave = y_resampled / np.max(np.abs(y_resampled))
+
+            duration = 5
+            waveform = -1*np.tile(wave, fund_freq*duration) 
 
             w = 2 # Points to avg in the smoothing process
             waveform = convolve(waveform, Box1DKernel(w))
+
             signal_int16 = np.int16(waveform * 32767)
             write(self.file_name, sampling_freq, signal_int16)
             #self.show_fft(waveform, sampling_freq)
@@ -277,7 +282,7 @@ class Canvas(QWidget):
             N = 44100
             period = 2*np.pi 
             sampling_freq = N
-            t = np.linspace(0, period, N, endpoint=False)
+            t = np.linspace(0, period, N, endpoint=False) # this is one second of time
 
             waveform = np.zeros_like(t)
 
@@ -330,14 +335,18 @@ class Canvas(QWidget):
         plt.grid(True)
         plt.show()
 
+    """ 
+    Transformation from pyqt5 gui coordinate system to frequency domain coordinates
+    """
     def x_transform(self, x):
+
         return int(round(x * self.max_x / self.width(), 0))
     
     def x_transform_inverse(self, x):
         return int(round((x * self.width() / self.max_x)))
 
     def y_transform(self, y):
-        return round((self.height() - y)/self.mag_norm, 3)
+        return round((self.height()/self.x_divider  - y)/self.mag_norm, 3)
 
     def y_transform_inverse(self, y):
-        return int(round(self.height() - (y * self.mag_norm)))
+        return int(round(self.height()/self.x_divider  - (y * self.mag_norm)))
