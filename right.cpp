@@ -5,30 +5,33 @@
 
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <math.h>
 #include <stdio.h>
 
 #include "hardware/adc.h"
+#include "hardware/clocks.h"
 #include "hardware/gpio.h"
 #include "pico/stdlib.h"
-#include "right.pio.h"
+#include <PicoLed.hpp>
 
-#include "i2c_slave/include/i2c_fifo.h"
-#include "i2c_slave/include/i2c_slave.h"
+#include "hardware/uart.h"
 
-#include <Adafruit_NeoPixel.h>
+// #include <Adafruit_NeoPixel.h>
 
-static const uint I2C_SLAVE_ADDRESS = 112; // we address in decimal
-static const uint I2C_BAUDRATE = 100000;   // 100 kHz
-
-static const uint I2C_SLAVE_SDA_PIN = 20;
-static const uint I2C_SLAVE_SCL_PIN = 21;
+#define UART_ID uart1
+#define BAUD_RATE 38400
+// We are using pins 0 and 1, but see the GPIO function select table in the
+// datasheet for information on which other pins can be used.
+#define UART_TX_PIN 4
+#define UART_RX_PIN 5
 
 static const uint base_output = 9;
 static const uint base_input = 13;
+int foobar = 0;
 
 // Converts left to right LED index to logical address
-static const uint8_t ledTrans[13] = {6, 5, 7, 4, 8, 3, 9, 2, 10, 1, 11, 0, 12};
+static const uint8_t ledTrans[13] = {12, 5, 11, 4, 10, 3, 9, 2, 8, 1, 7, 0, 6};
 
 static const uint historySize = 150;
 uint16_t dial1History[historySize] = {0};
@@ -39,19 +42,21 @@ long history1Sum = 0;
 long history2Sum = 0;
 long history3Sum = 0;
 
+uint16_t key, oldKey;
+uint8_t sendBuf[20];
+char recvBuf[600];
+uint16_t recvPtr = 0;
+
+uint16_t baseFreq, mask;
+uint8_t analog[3];
+bool analog1, analog2, analog3, needLED;
+
+float ratio = 1.05946309436;
+
 bool ledUpdated = false;
 
 #define LED_COUNT 13
 #define LED_PIN 0
-Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
-
-// this is where i2c writes go. Doesn't neeed to be 256 bytes but
-// i don't want addresses to rollover
-static struct {
-  uint8_t mem[256];
-  uint8_t mem_address;
-  bool mem_address_written;
-} context;
 
 template <int N> struct LUT {
   constexpr LUT() : values() {
@@ -70,135 +75,70 @@ template <int N> struct LUT {
 
 constexpr auto buttonLookup = LUT<65535>();
 
-static void i2c_slave_handler(i2c_inst_t *i2c, i2c_slave_event_t event) {
-  switch (event) {
-  case I2C_SLAVE_RECEIVE: // master has written some data
-    if (!context.mem_address_written) {
-      // writes always start with the memory address
-      context.mem_address = i2c_read_byte(i2c);
-      context.mem_address_written = true;
-    } else {
-      // save into memory
-      context.mem[context.mem_address] = i2c_read_byte(i2c);
-      context.mem_address++;
-      ledUpdated = true;
-    }
-    break;
-  case I2C_SLAVE_REQUEST: // master is requesting data
-    // load from memory
-    i2c_write_byte(i2c, context.mem[context.mem_address]);
-    context.mem_address++;
-    break;
-  case I2C_SLAVE_FINISH: // master has signalled Stop / Restart
-    context.mem_address_written = false;
-    break;
-  default:
-    break;
-  }
+void uart_setup() {
+  // Set up our UART with the required speed.
+  uart_init(UART_ID, BAUD_RATE);
+
+  // Set the TX and RX pins by using the function select on the GPIO
+  // Set datasheet for more information on function select
+  gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
+  gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
 }
-
-static void setup_slave() {
-  gpio_init(I2C_SLAVE_SDA_PIN);
-  gpio_set_function(I2C_SLAVE_SDA_PIN, GPIO_FUNC_I2C);
-  gpio_pull_up(I2C_SLAVE_SDA_PIN);
-
-  gpio_init(I2C_SLAVE_SCL_PIN);
-  gpio_set_function(I2C_SLAVE_SCL_PIN, GPIO_FUNC_I2C);
-  gpio_pull_up(I2C_SLAVE_SCL_PIN);
-
-  i2c_init(i2c0, I2C_BAUDRATE);
-  // configure I2C0 for slave mode
-  i2c_slave_init(i2c0, I2C_SLAVE_ADDRESS, &i2c_slave_handler);
-}
-
-// class that sets up and reads the 4x4 button matrix
-class button_matrix {
-public:
-  // constructor
-  // base_input is the starting gpio for the 4 input pins
-  // base_output is the starting gpio for the 4 output pins
-  button_matrix(uint base_input, uint base_output) {
-    // pio 0 is used
-    pio = pio0;
-    // state machine 0
-    sm = 0;
-    // configure the used pins
-    for (int i = 0; i < 4; i++) {
-      // output pins
-      pio_gpio_init(pio, base_output + i);
-    }
-    for (int i = 0; i < 4; i++) {
-      // input pins with pull down
-      pio_gpio_init(pio, base_input + i);
-      gpio_pull_down(base_input + i);
-    }
-    // load the pio program into the pio memory
-    uint offset = pio_add_program(pio, &button_matrix_program);
-    // make a sm config
-    pio_sm_config c = button_matrix_program_get_default_config(offset);
-    // set the 'in' pins
-    sm_config_set_in_pins(&c, base_input);
-    // set the 4 output pins to output
-    pio_sm_set_consecutive_pindirs(pio, sm, base_output, 4, true);
-    // set the 'set' pins
-    sm_config_set_set_pins(&c, base_output, 4);
-    // set shift such that bits shifted by 'in' end up in the lower 16 bits
-    sm_config_set_in_shift(&c, 0, 0, 0);
-    // init the pio sm with the config
-    pio_sm_init(pio, sm, offset, &c);
-    // enable the sm
-    pio_sm_set_enabled(pio, sm, true);
-  }
-
-  // read the 4x4 matrix
-  int read(void) {
-    // value is used to read from the fifo
-    uint32_t value = 0;
-    // clear the FIFO, we only want a currently pressed key
-    pio_sm_clear_fifos(pio, sm);
-    // give the sm some time to fill the FIFO if a key is being pressed
-    sleep_ms(1);
-    // check that the FIFO isn't empty
-    if (pio_sm_is_rx_fifo_empty(pio, sm)) {
-      return -1;
-    }
-    // read one data item from the FIFO
-    value = pio_sm_get(pio, sm);
-    return value;
-  }
-
-private:
-  // the pio instance
-  PIO pio;
-  // the state machine
-  uint sm;
-};
-button_matrix *my_matrix;
-
-uint16_t matrix_task() {
-  // read the matrix of buttons
-  // int key = my_matrix->read();
-  uint16_t key = 0;
+uint16_t hexto16(char *hex) {
+  uint16_t val = 0;
   for (int i = 0; i < 4; i++) {
-    gpio_put(base_output + i, 1);
-    sleep_us(10);
-    uint8_t rawIn = (gpio_get_all() >> base_input) & 0b1111;
-    key |= rawIn << (i * 4);
-    gpio_put(base_output + i, 0);
+    // get current character then increment
+    uint8_t byte = *hex++;
+    // transform hex character to the 4bit equivalent number, using the ascii
+    // table indexes
+    if (byte >= '0' && byte <= '9')
+      byte = byte - '0';
+    else if (byte >= 'A' && byte <= 'F')
+      byte = byte - 'A' + 10;
+    else if (byte >= 'a' && byte <= 'f')
+      byte = byte - 'a' + 10;
+    // shift 4 to make space for new digit, and add the 4 bits of the new digit
+    val = (val << 4) | (byte & 0xF);
   }
-  /*if (key != 0) { // a key was pressed: print its number
-    for (int i = 15; i >= 0; i--) {
-      printf("%d", (key >> i) & 1);
-      /*if ((key >> i) & 1) {
-        printf("%d", i);
-        }
+  return val;
 }
-printf("\n");
-}*/
-  return key;
+uint32_t hexto32(char *hex) {
+  uint32_t val = 0;
+  for (int i = 0; i < 8; i++) {
+    // get current character then increment
+    uint8_t byte = *hex++;
+    // transform hex character to the 4bit equivalent number, using the ascii
+    // table indexes
+    if (byte >= '0' && byte <= '9')
+      byte = byte - '0';
+    else if (byte >= 'A' && byte <= 'F')
+      byte = byte - 'A' + 10;
+    else if (byte >= 'a' && byte <= 'f')
+      byte = byte - 'a' + 10;
+    // shift 4 to make space for new digit, and add the 4 bits of the new digit
+    val = (val << 4) | (byte & 0xF);
+  }
+  return val;
 }
-
-uint32_t freqToColor(uint64_t freq) {
+uint8_t hexto8(char *hex) {
+  uint8_t val = 0;
+  for (int i = 0; i < 2; i++) {
+    // get current character then increment
+    uint8_t byte = *hex++;
+    // transform hex character to the 4bit equivalent number, using the ascii
+    // table indexes
+    if (byte >= '0' && byte <= '9')
+      byte = byte - '0';
+    else if (byte >= 'A' && byte <= 'F')
+      byte = byte - 'A' + 10;
+    else if (byte >= 'a' && byte <= 'f')
+      byte = byte - 'a' + 10;
+    // shift 4 to make space for new digit, and add the 4 bits of the new digit
+    val = (val << 4) | (byte & 0xF);
+  }
+  return val;
+}
+PicoLed::Color freqToColor(uint64_t freq) {
   // while (freq < 400000000000000) { // 400 tHz
   //   freq *= freq;
   // }
@@ -206,12 +146,13 @@ uint32_t freqToColor(uint64_t freq) {
   int input_msb_position = 63 ^ __builtin_clzll(freq);
   // We want the output to be >= 2^47,
   // so we need to shift input to the right until the MSB position is 47:
-  float wavelength = 299792458.0 / (freq << (47 - input_msb_position));
+  float wavelength = 1e9 * 299792458.0 / (freq << (47 - input_msb_position));
+  while(wavelength > 750) wavelength /= 2;
 
   // https://gist.github.com/friendly/67a7df339aa999e2bcfcfec88311abfc
   float R, G, B;
 #define gamma 0.8
-  if (wavelength >= 380 & wavelength <= 440) {
+  if (wavelength >= 375 & wavelength <= 440) {
     float attenuation = 0.3 + 0.7 * (wavelength - 380) / (440 - 380);
     R = pow(((-(wavelength - 440) / (440 - 380)) * attenuation), gamma);
     G = 0.0;
@@ -241,32 +182,84 @@ uint32_t freqToColor(uint64_t freq) {
     R = 1.0;
     G = 1.0;
     B = 1.0;
+    //printf("%.9g\n", wavelength);
   }
   R = R * 255;
   G = G * 255;
   B = B * 255;
-  return (((uint8_t)R) << 16) | (((uint8_t)G) << 8) | ((uint8_t)B);
+  // return (((uint8_t)R) << 16) | (((uint8_t)G) << 8) | ((uint8_t)B);
+  //printf("%lld %.9g %d %d %d\n", freq, wavelength, (uint8_t)R, (uint8_t)G,
+  //       (uint8_t)B);
+  return PicoLed::RGB((uint8_t)R, (uint8_t)G, (uint8_t)B);
 }
 
-void led_task() {
-  union {
-    float f;
-    unsigned char bytes[4];
-  } ratio;
-  if (ledUpdated && !context.mem_address_written) {
-    ledUpdated = false;
-    uint16_t baseFreq = (context.mem[5] << 8) | context.mem[6];
-    uint8_t numKeys = context.mem[7];
-    for (int i = 0; i < 4; i++)
-      ratio.bytes[i] = context.mem[8 + i];
-    uint16_t mask = (context.mem[12] << 8) | context.mem[13];
-    for (int i = 0; i < numKeys; i++) {
+void led_task(auto strip) {
+  if(needLED){
+    needLED = false;
+    strip.clear();
+    for (int i = 0; i < 13; i++) {
       if (((1 << i) & mask) != 0) {
-        strip.setPixelColor(ledTrans[i], freqToColor(baseFreq + (ratio.f * i)));
+        float noteFreq = baseFreq * pow(ratio, i);
+        strip.setPixelColor(ledTrans[i], freqToColor((uint64_t)noteFreq));
       }
     }
+    /*strip.setPixelColor(ledTrans[foobar], PicoLed::RGB(255,0,0));
+    foobar++;
+    if(foobar == 13) foobar = 0;*/
     strip.show();
+  }}
+
+void uart_receive() {
+  while (uart_is_readable(UART_ID)) {
+    recvBuf[recvPtr] = uart_getc(UART_ID);
+    printf("%c", recvBuf[recvPtr]);
+    if (recvBuf[recvPtr] == '@') {
+      if (recvPtr >= 5 && recvBuf[recvPtr - 5] == '!') {
+        // Valid transaction
+        baseFreq = hexto16(&recvBuf[recvPtr - 4]);
+        printf("%d\n", baseFreq);
+        needLED = true;
+      }
+      memset(recvBuf, 0, sizeof(recvBuf));
+      recvPtr = 0;
+    } else if (recvBuf[recvPtr] == '$') {
+      if (recvPtr >= 3 && recvBuf[recvPtr - 3] == '#') {
+        // Valid transaction
+        uint8_t numKeys = hexto8(&recvBuf[recvPtr - 2]);
+        mask = 0x1FFF >> (13 - numKeys);
+        ratio = pow(2, 1.0 / (numKeys - 1));
+        needLED = true;
+      }
+      memset(recvBuf, 0, sizeof(recvBuf));
+      recvPtr = 0;
+    } else {
+      recvPtr++;
+      if(recvPtr >= 600) recvPtr = 0;
+    }
   }
+}
+
+uint16_t matrix_task() {
+  // read the matrix of buttons
+  // int key = my_matrix->read();
+  uint16_t key = 0;
+  for (int i = 0; i < 4; i++) {
+    gpio_put(base_output + i, 1);
+    sleep_us(10);
+    uint8_t rawIn = (gpio_get_all() >> base_input) & 0b1111;
+    key |= rawIn << (i * 4);
+    gpio_put(base_output + i, 0);
+  }
+  if (key != 0) { // a key was pressed: print its number
+    for (int i = 15; i >= 0; i--) {
+      printf("%d", (key >> i) & 1);
+      // if ((key >> i) & 1) {
+      // printf("%d", i);
+      //}
+    }
+    printf("\n");
+  }
+  return key;
 }
 
 uint16_t movingAvg(uint16_t *ptrArrNumbers, long *ptrSum, int pos, int len,
@@ -280,25 +273,36 @@ uint16_t movingAvg(uint16_t *ptrArrNumbers, long *ptrSum, int pos, int len,
 }
 
 void analog_task() {
+  uint8_t tmp;
   adc_select_input(0);
-  context.mem[2] = 127 - (movingAvg(dial1History, &history1Sum, historyIndex,
-                                    historySize, adc_read()) >>
-                          5);
-  adc_select_input(1);
-  context.mem[3] = 127 - (movingAvg(dial2History, &history2Sum, historyIndex,
-                                    historySize, adc_read()) >>
-                          5);
-  adc_select_input(2);
+  tmp = 127 - (movingAvg(dial1History, &history1Sum, historyIndex, historySize,
+                         adc_read()) >>
+               5);
+  analog1 = (tmp != analog[0]);
+  analog[0] = tmp;
 
-  context.mem[4] = 127 - ((movingAvg(dial3History, &history3Sum, historyIndex,
-                                     historySize, adc_read()) /
-                           2800.0) *
-                          127);
-  if (context.mem[4] < 5)
-    context.mem[4] = 0;
-  printf("dial1: %d \n", context.mem[2]);
-  printf("dial2: %d \n", context.mem[3]);
-  printf("dial3: %d \n", context.mem[4]);
+  adc_select_input(1);
+  tmp = 127 - (movingAvg(dial2History, &history2Sum, historyIndex, historySize,
+                         adc_read()) >>
+               5);
+  analog2 = (tmp != analog[1]);
+  analog[1] = tmp;
+
+  adc_select_input(2);
+  tmp = 127 - ((movingAvg(dial3History, &history3Sum, historyIndex, historySize,
+                          adc_read()) /
+                2800.0) *
+               127);
+
+  if (tmp < 5)
+    tmp = 0;
+
+  analog3 = (tmp != analog[2]);
+  analog[2] = tmp;
+
+  // printf("dial1: %d \n", context.mem[2]);
+  // printf("dial2: %d \n", context.mem[3]);
+  // printf("dial3: %d \n", context.mem[4]);
   historyIndex++;
   if (historyIndex >= historySize) {
     historyIndex = 0;
@@ -308,8 +312,11 @@ void analog_task() {
 int main() {
   // needed for printf
   stdio_init_all();
-  setup_slave();
-  strip.begin();
+  uart_setup();
+  auto strip = PicoLed::addLeds<PicoLed::WS2812B>(
+      pio1_hw, 3, LED_PIN, LED_COUNT, PicoLed::FORMAT_GRB);
+  strip.setBrightness(255);
+  strip.fill(PicoLed::RGB(255, 0, 0));
   strip.show();
 
   adc_init();
@@ -329,7 +336,30 @@ int main() {
 
   // my_matrix = new button_matrix((uint)9, (uint)13);
   while (true) {
-    uint16_t key = buttonLookup.values[matrix_task()];
+    oldKey = key;
+    key = buttonLookup.values[matrix_task()];
+    if (oldKey != key) {
+      sprintf((char *)sendBuf, "!%04X@", key);
+      uart_write_blocking(UART_ID, sendBuf, 6);
+    }
+    if (analog1) {
+      sprintf((char *)sendBuf, "#%02X$", analog[0]);
+      uart_write_blocking(UART_ID, sendBuf, 4);
+      analog1 = false;
+    }
+    if (analog2) {
+      sprintf((char *)sendBuf, "&%02X*", analog[1]);
+      uart_write_blocking(UART_ID, sendBuf, 4);
+      analog2 = false;
+    }
+    if (analog3) {
+      sprintf((char *)sendBuf, "(%02X)", analog[2]);
+      uart_write_blocking(UART_ID, sendBuf, 4);
+      analog3 = false;
+    }
+
+    uart_receive();
+    led_task(strip);
     /*if (key != 0) {
       for (int i = 0; i < 16; i++) {
         if ((key >> i) & 1) {
@@ -338,9 +368,6 @@ int main() {
       }
       }*/
 
-    context.mem[1] = key & 0xFF; // I guess we're little endian
-    context.mem[0] = (key & 0xFF00) >> 8;
     analog_task();
-    led_task();
   }
 }
