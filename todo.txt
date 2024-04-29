@@ -11,6 +11,7 @@ MIDI channel: 1, controller number: 4
         5) Clear Button -> Top Right Corner ?
         6) Keep or not kep reverb on synth ?
         7) Clean up github link include list of dependenices etc
+        8) Include Recording
 
         Time Tab:
         1) add axes labels ?
