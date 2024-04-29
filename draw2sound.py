@@ -80,9 +80,6 @@ class Draw2SoundGUI(QMainWindow):
         self.menuBar().setFixedHeight(height)
 
         presets_menu = self.menuBar().addMenu("Presets")
-        font = QFont()
-        font.setPointSize(14)
-        presets_menu.setFont(font)
 
         sine_action = QAction("Sine", self)
         sine_action.triggered.connect(self.add_sine_preset)
@@ -100,11 +97,42 @@ class Draw2SoundGUI(QMainWindow):
         saw_action.triggered.connect(self.add_saw_preset)
         presets_menu.addAction(saw_action)
 
+        twelve_edo_action = QAction("12 edo", self)
+        twelve_edo_action.triggered.connect(self.add_12edo_preset)
+        presets_menu.addAction(twelve_edo_action)
+
+        eleven_edo_action = QAction("11 edo", self)
+        eleven_edo_action.triggered.connect(self.add_11edo_preset)
+        presets_menu.addAction(eleven_edo_action)
+
         ten_edo_action = QAction("10 edo", self)
         ten_edo_action.triggered.connect(self.add_10edo_preset)
         presets_menu.addAction(ten_edo_action)
 
-        ###################################################
+        nine_edo_action = QAction("9 edo", self)
+        nine_edo_action.triggered.connect(self.add_9edo_preset)
+        presets_menu.addAction(nine_edo_action)
+
+        eight_edo_action = QAction("8 edo", self)
+        eight_edo_action.triggered.connect(self.add_8edo_preset)
+        presets_menu.addAction(eight_edo_action)
+
+        seven_edo_action = QAction("7 edo", self)
+        seven_edo_action.triggered.connect(self.add_7edo_preset)
+        presets_menu.addAction(seven_edo_action)
+
+        six_edo_action = QAction("6 edo", self)
+        six_edo_action.triggered.connect(self.add_6edo_preset)
+        presets_menu.addAction(six_edo_action)
+
+        five_edo_action = QAction("5 edo", self)
+        five_edo_action.triggered.connect(self.add_5edo_preset)
+        presets_menu.addAction(five_edo_action)
+
+        four_edo_action = QAction("4 edo", self)
+        four_edo_action.triggered.connect(self.add_4edo_preset)
+        presets_menu.addAction(four_edo_action)
+
         width = self.screen_width//9
 
         scopeButton = QPushButton("Scope", self)
@@ -158,7 +186,7 @@ class Draw2SoundGUI(QMainWindow):
         self.spectrum.view(title="Spectrum", wxnoserver=True)
 
     def add_sine_preset(self):
-        if self.tab_widget.currentIndex() == 1: # for frequency mode
+        if self.tab_widget.currentIndex() == 1:
             self.frequency_canvas.position = []
             
             fundamental_freq = 100
@@ -189,60 +217,116 @@ class Draw2SoundGUI(QMainWindow):
             self.time_canvas.y_values = [point[1] for point in data]
 
     def add_square_preset(self):
-        if self.tab_widget.currentIndex() == 1: # for frequency mode
-            self.frequency_canvas.position = []
-            
-            num_terms = 1000
-            fundamental_freq = 100
-            for n in range(1, num_terms + 1):
-                if n % 2 == 1:
-                    amplitude = 4 / (n * np.pi)
-                    frequency = n * fundamental_freq
-                    self.frequency_canvas.position.append((self.frequency_canvas.x_transform_inverse(frequency), self.frequency_canvas.y_transform_inverse(amplitude)))
-
-            self.frequency_canvas.update()
-
-
-    def add_triangle_preset(self):
-        if self.tab_widget.currentIndex() == 1:
-            self.frequency_canvas.position = []
-
-            num_terms = 1000
-            fundamental_freq = 100
-            for n in range(1, num_terms + 1):
-                if n % 2 == 1:
-                    amplitude = (8 / (np.pi**2 * (n**2))) * (-1)**((n-1)/2)
-                    frequency = n * fundamental_freq
-                    self.frequency_canvas.position.append((self.frequency_canvas.x_transform_inverse(frequency), self.frequency_canvas.y_transform_inverse(amplitude)))
-
-            self.frequency_canvas.update()
-
-    def add_saw_preset(self):
-        if self.tab_widget.currentIndex() == 1:
-            self.frequency_canvas.position = []
-
-            num_terms = 1000
-            fundamental_freq = 100
-            for n in range(1, num_terms + 1):
-                amplitude = 1 / n  
+        self.frequency_canvas.position = []
+        
+        num_terms = 1000
+        fundamental_freq = 100
+        for n in range(1, num_terms + 1):
+            if n % 2 == 1:
+                amplitude = 4 / (n * np.pi)
                 frequency = n * fundamental_freq
                 self.frequency_canvas.position.append((self.frequency_canvas.x_transform_inverse(frequency), self.frequency_canvas.y_transform_inverse(amplitude)))
 
-            self.frequency_canvas.update()
+        self.frequency_canvas.update()
+        self.frequency_canvas.chooseSound()
+
+
+    def add_triangle_preset(self):
+        
+        self.frequency_canvas.position = []
+
+        num_terms = 1000
+        fundamental_freq = 100
+        for n in range(1, num_terms + 1):
+            if n % 2 == 1:
+                amplitude = (8 / (np.pi**2 * (n**2))) * (-1)**((n-1)/2)
+                frequency = n * fundamental_freq
+                self.frequency_canvas.position.append((self.frequency_canvas.x_transform_inverse(frequency), self.frequency_canvas.y_transform_inverse(amplitude)))
+
+        self.frequency_canvas.update()
+        self.frequency_canvas.chooseSound()
+
+    def add_saw_preset(self):
+        self.frequency_canvas.position = []
+
+        num_terms = 1000
+        fundamental_freq = 100
+        for n in range(1, num_terms + 1):
+            amplitude = 1 / n  
+            frequency = n * fundamental_freq
+            self.frequency_canvas.position.append((self.frequency_canvas.x_transform_inverse(frequency), self.frequency_canvas.y_transform_inverse(amplitude)))
+
+        self.frequency_canvas.update()
+        self.frequency_canvas.chooseSound()
+
+    def add_4edo_preset(self):
+        self.frequency_canvas.position = []
+        p = np.array([4, 7, 8, 10, 10, 11, 12, 13, 14, 14, 15])
+        n = 4
+        self.xedo_append_coefficients(p, n)   
+
+    def add_5edo_preset(self):
+        self.frequency_canvas.position = []
+        p = np.array([5, 8, 10, 12, 13, 14, 15, 16, 17, 17, 18])
+        n = 5
+        self.xedo_append_coefficients(p, n)   
+
+    def add_6edo_preset(self):
+        self.frequency_canvas.position = []
+        p = np.array([6, 10, 12, 14, 16, 17, 18, 19, 20, 21, 22])
+        n = 6
+        self.xedo_append_coefficients(p, n)   
+    
+    def add_7edo_preset(self):
+        self.frequency_canvas.position = []
+        p = np.array([7, 11, 14, 16, 18, 20, 21, 22, 23, 24, 25])
+        n = 7
+        self.xedo_append_coefficients(p, n)
+
+    def add_8edo_preset(self):
+        self.frequency_canvas.position = []
+        p = np.array([8, 13, 16, 19, 21, 22, 24, 25, 27, 28, 29])
+        n = 8
+        self.xedo_append_coefficients(p, n)
+    
+    def add_9edo_preset(self):
+        self.frequency_canvas.position = []
+        p = np.array([9, 14, 18, 21, 23, 25, 27, 29, 30, 31, 32])
+        n = 9
+        self.xedo_append_coefficients(p, n)
 
     def add_10edo_preset(self):
-        if self.tab_widget.currentIndex() == 1:
-            self.frequency_canvas.position = []
-            b = 2**(1/10)
-            f = 100
-            data_points = [(f, 1), (f*b**10, 1/2), (f*b**17, 1/3), (f*b**20, 1/4), (f*b**25, 1/5), (f*b**28, 1/6), (f*b**30, 1/7)]
-            self.append_coefficients(data_points)
+        self.frequency_canvas.position = []
+        p = np.array([10, 16, 20, 23, 26, 28, 30, 32, 33, 35, 36])
+        n = 10
+        self.xedo_append_coefficients(p, n)
+
+    def add_11edo_preset(self):
+        self.frequency_canvas.position = []
+        p = np.array([11, 17, 22, 26, 28, 31, 33, 35, 37, 38, 39])
+        n = 11
+        self.xedo_append_coefficients(p, n)
+    
+    def add_12edo_preset(self):
+        self.frequency_canvas.position = []
+        p = np.array([0, 12, 19, 24, 28, 31, 34, 36, 38, 40, 42, 43])
+        n = 12
+        self.xedo_append_coefficients(p, n)
+    
+    def xedo_append_coefficients(self, p, n):
+        a = 2**(1/n)
+        LowerToneFrequency = 100
+        PartialFrequencies = LowerToneFrequency * np.power(a, p)
+        PartialAmplitudes = np.power(0.9, np.arange(1, 13))
+        data_points = combined_list = list(zip(PartialFrequencies, PartialAmplitudes))
+        self.append_coefficients(data_points)
+        self.frequency_canvas.chooseSound()
 
     def append_coefficients(self, data_points):
-            for point in data_points:
-                frequency, amplitude = point
-                self.frequency_canvas.position.append((self.frequency_canvas.x_transform_inverse(frequency), self.frequency_canvas.y_transform_inverse(amplitude)))
-            self.frequency_canvas.update()
+        for point in data_points:
+            frequency, amplitude = point
+            self.frequency_canvas.position.append((self.frequency_canvas.x_transform_inverse(frequency), self.frequency_canvas.y_transform_inverse(amplitude)))
+        self.frequency_canvas.update()
 
     def closeEvent(self, event):
         if (self.time_canvas.pyo_server.getIsBooted):

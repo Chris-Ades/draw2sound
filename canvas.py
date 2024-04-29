@@ -334,6 +334,7 @@ class Canvas(QWidget):
         self.parent.time_canvas.drawingEnabled = False
 
     def plot_on_frequency_canvas(self, sampling_rate, waveform):
+        self.parent.frequency_canvas.clearCanvas(skip_clear=True)
         fft_output = np.fft.fft(waveform)
         frequencies = np.fft.fftfreq(len(fft_output), 1/sampling_rate)
         frequencies = frequencies[:len(frequencies)//2]
@@ -345,6 +346,6 @@ class Canvas(QWidget):
         frequencies = 1*frequencies
 
         data_points = combined_list = list(zip(frequencies, amplitudes))
-        filtered_data_points = [tup for tup in data_points if all(val >= 0.0001 for val in tup)]
+        filtered_data_points = [tup for tup in data_points if all(val >= 0.001 for val in tup)]
 
         self.parent.append_coefficients(filtered_data_points)

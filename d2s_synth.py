@@ -24,13 +24,13 @@ class D2S_synth:
         self.src = SfPlayer(file_path, speed=self.notes["pitch"]*self.transpo/fund_freq, loop=True, offset=0, interp=2, mul=self.env, add=0)
         
         self.lp0 = MoogLP(self.src.mix(), self.lp_cutoff)
-        #self.rev0 = STRev(self.lp0)
-        self.comp0 = Compress(self.lp0.mix(), thresh=-24)
+  
+        self.comp0 = Compress(self.lp0.mix(), thresh=-20)
 
         self.src_trem = self.src * self.tremolo
         self.lp1 = MoogLP(self.src_trem.mix(), self.lp_cutoff)
         self.rev1 = STRev(self.lp1)
-        self.comp1 = Compress(self.rev1.mix(), thresh=-24)
+        self.comp1 = Compress(self.rev1.mix(), thresh=-20)
 
         def set_vals():
             self.env.setRelease(self.rel.get())
