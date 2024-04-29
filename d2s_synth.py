@@ -19,18 +19,18 @@ class D2S_synth:
 
         self.tremolo = Sine(self.trem_freq)
         self.env = MidiAdsr(notes["velocity"], attack=0.05, decay=0.1, sustain=0.7, release=0.8, mul=self.vol) 
-        self.transpo = Sig(Bendin(brange=12, scale=1)) 
+        self.transpo = Sig(Bendin(brange=2, scale=1)) 
 
         self.src = SfPlayer(file_path, speed=self.notes["pitch"]*self.transpo/fund_freq, loop=True, offset=0, interp=2, mul=self.env, add=0)
         
         self.lp0 = MoogLP(self.src.mix(), self.lp_cutoff)
         #self.rev0 = STRev(self.lp0)
-        self.comp0 = Compress(self.lp0.mix(), thresh=-15)
+        self.comp0 = Compress(self.lp0.mix(), thresh=-24)
 
         self.src_trem = self.src * self.tremolo
         self.lp1 = MoogLP(self.src_trem.mix(), self.lp_cutoff)
-        #self.rev1 = STRev(self.lp1)
-        self.comp1 = Compress(self.lp1.mix(), thresh=-15)
+        self.rev1 = STRev(self.lp1)
+        self.comp1 = Compress(self.rev1.mix(), thresh=-24)
 
         def set_vals():
             self.env.setRelease(self.rel.get())

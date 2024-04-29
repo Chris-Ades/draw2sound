@@ -57,30 +57,11 @@ class Canvas(QWidget):
         self.spectrum = parent.spectrum
 
         move_x = self.width()
-        self.chooseSoundButton = QPushButton('Choose Sound', self)
-        self.chooseSoundButton.clicked.connect(self.chooseSound)
-        self.chooseSoundButton.setGeometry(move_x-260, 0, 100, 30)
-        self.chooseSoundButton.setEnabled(False)
-
-        self.clearButton = QPushButton('Clear', self)
-        self.clearButton.clicked.connect(self.clearCanvas)
-        self.clearButton.setGeometry(move_x-130, 0, 100, 30)
-        self.clearButton.setStyleSheet("background-color: red;")
-
-        self.scopeButton = QPushButton('Scope', self)
-        self.scopeButton.clicked.connect(self.show_scope)
-        self.scopeButton.setGeometry(move_x-390, 0, 100, 30)
-        self.scopeButton.setEnabled(False)
-
-        self.spectrumButton = QPushButton('Spectrum', self)
-        self.spectrumButton.clicked.connect(self.show_spectrum)
-        self.spectrumButton.setGeometry(move_x-520, 0, 100, 30)
-        self.spectrumButton.setEnabled(False)
 
         self.keyboardButton = QPushButton('Keyboard', self)
         self.keyboardButton.clicked.connect(self.show_keyboard)
         self.keyboardButton.setGeometry(move_x-650, 0, 100, 30)
-        self.keyboardButton.setEnabled(False)
+
 
     def paintEvent(self, event):
         if self.domain == "time":
@@ -108,9 +89,6 @@ class Canvas(QWidget):
             
             painter.setFont(QFont("Arial", 12))
             painter.setPen(self.pen)
-            # painter.drawText(self.width() // 2, self.height() // 2, "0")
-            # painter.drawText(0.05*self.width(), self.height() // 2, "-T/2")
-            # painter.drawText(self.width() - 0.05*self.width(), self.height() // 2, "T/2")
 
         if self.domain == "frequency":
             painter = QPainter(self)
@@ -165,7 +143,7 @@ class Canvas(QWidget):
 
             self.position.append((event.x(), event.y()))
             self.update()
-            self.chooseSoundButton.setEnabled(True)
+            self.parent.loadButton.setStyleSheet("")
 
     def mouseMoveEvent(self, event):
         if self.domain == "time":
@@ -192,7 +170,6 @@ class Canvas(QWidget):
     def mouseReleaseEvent(self, event):
         if self.domain == "time":
             if self.drawingEnabled and event.button() == Qt.LeftButton:
-                self.chooseSoundButton.setEnabled(True)
                 self.path.lineTo(event.pos())
                 self.update()
                 self.drawingEnabled = False
@@ -207,28 +184,31 @@ class Canvas(QWidget):
                 if abs(point[0] - event.x()) <= self.diameter and abs(point[1] - event.y()) <= self.diameter:
                     del self.position[i]
                     self.update()
-                    if self.position == []:
-                        self.chooseSoundButton.setEnabled(False)
                     return
 
-    def clearCanvas(self):
-        self.chooseSoundButton.setEnabled(False)
-        self.scopeButton.setEnabled(False)
-        self.spectrumButton.setEnabled(False)
-        self.keyboardButton.setEnabled(False)
-
+    def clearCanvas(self, skip_clear=False):
         if self.domain == "time":
             self.path = QPainterPath()
             self.update()
             self.drawingEnabled = True
             self.x_values = []
             self.y_values = []
-            self.parent.tab_widget.setTabEnabled(1, True)
+
+            if skip_clear == False:
+                self.parent.frequency_canvas.position = []
+                self.parent.frequency_canvas.update()
 
         if self.domain == "frequency":
             self.position = []
-            self.parent.tab_widget.setTabEnabled(0, True)
             self.update()
+            if skip_clear == False:
+                self.parent.time_canvas.path = QPainterPath()
+                self.parent.time_canvas.update()
+                self.parent.time_canvas.drawingEnabled = True
+                self.parent.time_canvas.x_values = []
+                self.parent.time_canvas.y_values = []
+            
+
 
         self.synth.stop()
         
@@ -242,15 +222,13 @@ class Canvas(QWidget):
         if self.domain == "time":
             if (self.y_values == []):
                 return
-            self.parent.tab_widget.setTabEnabled(1, False)
-            # interpolate values like you did so you can increase sampling frequency
-            # scale time domain and add number markers
+
             x = np.array(self.x_values)
             y = np.array(self.y_values)
             
             fund_freq = int(220)
-            sampling_freq = int(44000)
-            N = int(sampling_freq / fund_freq)
+            sampling_rate = int(44000)
+            N = int(sampling_rate / fund_freq)
 
             interp_func = interp1d(x, y, kind='linear')
 
@@ -261,29 +239,22 @@ class Canvas(QWidget):
             duration = 5
             waveform = -1*np.tile(wave, fund_freq*duration) 
 
-            w = 2 # Points to avg in the smoothing process
+            w = 10 # Points to avg in the smoothing process
             waveform = convolve(waveform, Box1DKernel(w))
 
             signal_int16 = np.int16(waveform * 32767)
-            write(self.file_name, sampling_freq, signal_int16)
-            #self.show_fft(waveform, sampling_freq)
-
-            self.start_synth(fund_freq)
-            self.chooseSoundButton.setEnabled(False)
-            self.scopeButton.setEnabled(True)
-            self.spectrumButton.setEnabled(True)
-            self.keyboardButton.setEnabled(True)    
+            write(self.file_name, sampling_rate, signal_int16)
+            self.plot_on_frequency_canvas(sampling_rate, waveform)
+            self.start_synth(fund_freq)  
 
         if self.domain == "frequency":
-            self.parent.tab_widget.setTabEnabled(0, False)
-
+            if (self.position == []):
+                return
             data_points = [(self.x_transform(x), self.y_transform(y)) for x, y in self.position]
-
             N = 44100
             period = 2*np.pi 
-            sampling_freq = N
-            t = np.linspace(0, period, N, endpoint=False) # this is one second of time
-
+            sampling_rate = N
+            t = np.linspace(0, period, N, endpoint=False) 
             waveform = np.zeros_like(t)
 
             for point in data_points:
@@ -292,26 +263,20 @@ class Canvas(QWidget):
                     waveform = waveform + (magnitude*np.sin(freq * t))
 
             fund_freq = max(data_points, key=lambda x: x[1])[0]
-
             duration = 5
             waveform = np.tile(waveform, duration) 
             waveform = waveform / np.max(waveform)
-            
             signal_int16 = np.int16(waveform * 32767)
-            write(self.file_name, sampling_freq, signal_int16)
-            #self.show_fft(waveform, sampling_freq)
-            
-            self.start_synth(fund_freq)
-            self.chooseSoundButton.setEnabled(False)
-            self.scopeButton.setEnabled(True)
-            self.spectrumButton.setEnabled(True)
-            self.keyboardButton.setEnabled(True)   
+            write(self.file_name, sampling_rate, signal_int16)
+            self.plot_on_time_canvas(sampling_rate, fund_freq, waveform)
+            self.start_synth(fund_freq) 
 
     def start_synth(self, fund_freq):
         self.synth.setFundFreq(fund_freq)
         self.synth.setPath(self.file_path)
         self.synth.start()
         self.synth.out()
+        self.parent.loadButton.setStyleSheet("background-color: lime;")
 
     def show_scope(self):
         self.scope.view(title="Scope", wxnoserver=True)
@@ -322,9 +287,9 @@ class Canvas(QWidget):
     def show_keyboard(self):
         self.notes.keyboard(title="Keyboard", wxnoserver=True)
     
-    def show_fft(self, waveform, sampling_freq):
+    def show_fft(self, waveform, sampling_rate):
         fft_output = np.fft.fft(waveform)
-        frequencies = np.fft.fftfreq(len(fft_output), 1/sampling_freq)
+        frequencies = np.fft.fftfreq(len(fft_output), 1/sampling_rate)
         positive_frequencies = frequencies[:len(frequencies)//2]
         fft_output_positive = fft_output[:len(fft_output)//2]
         plt.figure(figsize=(8, 4))
@@ -335,9 +300,6 @@ class Canvas(QWidget):
         plt.grid(True)
         plt.show()
 
-    """ 
-    Transformation from pyqt5 gui coordinate system to frequency domain coordinates
-    """
     def x_transform(self, x):
 
         return int(round(x * self.max_x / self.width(), 0))
@@ -350,3 +312,39 @@ class Canvas(QWidget):
 
     def y_transform_inverse(self, y):
         return int(round(self.height()/self.x_divider  - (y * self.mag_norm)))
+
+    def plot_on_time_canvas(self, sampling_rate, fund_freq, waveform):
+        self.parent.time_canvas.clearCanvas(skip_clear=True)
+        samples_per_period = int(sampling_rate / fund_freq)
+        one_period_waveform = waveform[:samples_per_period]
+        x_new = np.linspace(0, 1, int(self.width()))  
+        f = interp1d(np.linspace(0, 1, len(one_period_waveform)), one_period_waveform, kind='linear')  
+        y_new = f(x_new)
+        y_new = -(0.45*self.height()*y_new / np.max(np.abs(y_new))) + self.height()//2 
+        x_new = x_new*int(self.width())
+        data = list(zip(x_new, y_new))
+        initial = True
+        for pos in data:
+            if initial == True:
+                self.parent.time_canvas.path.moveTo(pos[0], pos[1])
+                initial = False
+            else:
+                self.parent.time_canvas.path.lineTo(pos[0], pos[1])
+            self.parent.time_canvas.update()
+        self.parent.time_canvas.drawingEnabled = False
+
+    def plot_on_frequency_canvas(self, sampling_rate, waveform):
+        fft_output = np.fft.fft(waveform)
+        frequencies = np.fft.fftfreq(len(fft_output), 1/sampling_rate)
+        frequencies = frequencies[:len(frequencies)//2]
+        fft_output_positive = fft_output[:len(fft_output)//2]
+        amplitudes = np.abs(fft_output_positive)
+        plt.figure(figsize=(8, 4))
+
+        amplitudes = amplitudes / np.max(np.abs(amplitudes))
+        frequencies = 1*frequencies
+
+        data_points = combined_list = list(zip(frequencies, amplitudes))
+        filtered_data_points = [tup for tup in data_points if all(val >= 0.0001 for val in tup)]
+
+        self.parent.append_coefficients(filtered_data_points)
