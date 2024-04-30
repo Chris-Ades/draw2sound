@@ -58,21 +58,20 @@ bool ledUpdated = false;
 #define LED_COUNT 13
 #define LED_PIN 0
 
+// this makes a lookup table that moves around bit postions
+// if bit zero is set in the input, bit 11 will be set in the output, etc.
 template <int N> struct LUT {
   constexpr LUT() : values() {
-    // int map[13] = {11, 7, 2, 1, 12, 9, 5, 3, 8, 4, 10, 0, 10, 6, 14, 2};
     int map[13] = {11, 3, 15, 7, 9, 6, 13, 1, 8, 5, 12, 0, 4};
     for (auto arrayPos = 0; arrayPos < N; ++arrayPos) {
       for (int bitPos = 0; bitPos < 13; bitPos++) {
-        // values[arrayPos] =
-        // values[arrayPos] | (((arrayPos >> bitPos) & 1) << map[bitPos]);
         values[arrayPos] |= (((arrayPos >> map[bitPos]) & 1) << bitPos);
       }
     }
   }
   uint16_t values[N];
 };
-
+// this takes up a quarter of the flash lmao
 constexpr auto buttonLookup = LUT<65535>();
 
 void uart_setup() {
@@ -84,6 +83,8 @@ void uart_setup() {
   gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
   gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
 }
+
+// strtol without needing them to be null terminated, useful for substrings
 uint16_t hexto16(char *hex) {
   uint16_t val = 0;
   for (int i = 0; i < 4; i++) {
@@ -138,16 +139,15 @@ uint8_t hexto8(char *hex) {
   }
   return val;
 }
+
 PicoLed::Color freqToColor(uint64_t freq) {
-  // while (freq < 400000000000000) { // 400 tHz
-  //   freq *= freq;
-  // }
   // Get the place value of the most significant bit in input:
   int input_msb_position = 63 ^ __builtin_clzll(freq);
   // We want the output to be >= 2^47,
   // so we need to shift input to the right until the MSB position is 47:
   float wavelength = 1e9 * 299792458.0 / (freq << (47 - input_msb_position));
-  while(wavelength > 750) wavelength /= 2;
+  while (wavelength > 750)
+    wavelength /= 2;
 
   // https://gist.github.com/friendly/67a7df339aa999e2bcfcfec88311abfc
   float R, G, B;
@@ -182,19 +182,19 @@ PicoLed::Color freqToColor(uint64_t freq) {
     R = 1.0;
     G = 1.0;
     B = 1.0;
-    //printf("%.9g\n", wavelength);
+    // printf("%.9g\n", wavelength);
   }
   R = R * 255;
   G = G * 255;
   B = B * 255;
   // return (((uint8_t)R) << 16) | (((uint8_t)G) << 8) | ((uint8_t)B);
-  //printf("%lld %.9g %d %d %d\n", freq, wavelength, (uint8_t)R, (uint8_t)G,
+  // printf("%lld %.9g %d %d %d\n", freq, wavelength, (uint8_t)R, (uint8_t)G,
   //       (uint8_t)B);
   return PicoLed::RGB((uint8_t)R, (uint8_t)G, (uint8_t)B);
 }
 
 void led_task(auto strip) {
-  if(needLED){
+  if (needLED) {
     needLED = false;
     strip.clear();
     for (int i = 0; i < 13; i++) {
@@ -203,23 +203,26 @@ void led_task(auto strip) {
         strip.setPixelColor(ledTrans[i], freqToColor((uint64_t)noteFreq));
       }
     }
-    /*strip.setPixelColor(ledTrans[foobar], PicoLed::RGB(255,0,0));
-    foobar++;
-    if(foobar == 13) foobar = 0;*/
     strip.show();
-  }}
+  }
+}
 
 void uart_receive() {
   while (uart_is_readable(UART_ID)) {
     recvBuf[recvPtr] = uart_getc(UART_ID);
     printf("%c", recvBuf[recvPtr]);
+    //if we are on an ending character
     if (recvBuf[recvPtr] == '@') {
+      //check to see if we've received enough data and the start is
+      //where we expect, i.e. haven't missed a character
       if (recvPtr >= 5 && recvBuf[recvPtr - 5] == '!') {
         // Valid transaction
         baseFreq = hexto16(&recvBuf[recvPtr - 4]);
         printf("%d\n", baseFreq);
         needLED = true;
       }
+      //Even/especially if transaction isn't valid, clear the buffer 
+      //whenever we receive an ending character so junk doesn't accumulate
       memset(recvBuf, 0, sizeof(recvBuf));
       recvPtr = 0;
     } else if (recvBuf[recvPtr] == '$') {
@@ -232,16 +235,24 @@ void uart_receive() {
       }
       memset(recvBuf, 0, sizeof(recvBuf));
       recvPtr = 0;
+    } else if (recvBuf[recvPtr] == ')') {
+      if (recvPtr >= 5 && recvBuf[recvPtr - 5] == '(') {
+        // Valid transaction
+        mask = hexto16(&recvBuf[recvPtr - 4]);
+        needLED = true;
+      }
+      memset(recvBuf, 0, sizeof(recvBuf));
+      recvPtr = 0;
     } else {
       recvPtr++;
-      if(recvPtr >= 600) recvPtr = 0;
+      if (recvPtr >= 600)
+        recvPtr = 0;
     }
   }
 }
 
 uint16_t matrix_task() {
   // read the matrix of buttons
-  // int key = my_matrix->read();
   uint16_t key = 0;
   for (int i = 0; i < 4; i++) {
     gpio_put(base_output + i, 1);
@@ -274,10 +285,13 @@ uint16_t movingAvg(uint16_t *ptrArrNumbers, long *ptrSum, int pos, int len,
 
 void analog_task() {
   uint8_t tmp;
+  //movingAvg is to counteract the SUPER NOISY ADC
+  //shifted 5 is bc MIDI is 7 bit and also noise again
   adc_select_input(0);
   tmp = 127 - (movingAvg(dial1History, &history1Sum, historyIndex, historySize,
                          adc_read()) >>
                5);
+  //mark we need to send new value
   analog1 = (tmp != analog[0]);
   analog[0] = tmp;
 
@@ -293,7 +307,7 @@ void analog_task() {
                           adc_read()) /
                 2800.0) *
                127);
-
+  //footpedal has a bit of a deadzone
   if (tmp < 5)
     tmp = 0;
 
@@ -316,6 +330,7 @@ int main() {
   auto strip = PicoLed::addLeds<PicoLed::WS2812B>(
       pio1_hw, 3, LED_PIN, LED_COUNT, PicoLed::FORMAT_GRB);
   strip.setBrightness(255);
+  //Red helps to know they're on, but data hasn't been received
   strip.fill(PicoLed::RGB(255, 0, 0));
   strip.show();
 
@@ -334,7 +349,6 @@ int main() {
     gpio_pull_down(base_input + i);
   }
 
-  // my_matrix = new button_matrix((uint)9, (uint)13);
   while (true) {
     oldKey = key;
     key = buttonLookup.values[matrix_task()];
@@ -360,14 +374,6 @@ int main() {
 
     uart_receive();
     led_task(strip);
-    /*if (key != 0) {
-      for (int i = 0; i < 16; i++) {
-        if ((key >> i) & 1) {
-          printf("%d\n", i);
-        }
-      }
-      }*/
-
     analog_task();
   }
 }

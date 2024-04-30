@@ -8,6 +8,7 @@
 
 #include <cstring>
 #include <stdio.h>
+#include <limits.h>
 
 #include <cmath>
 #include <cstdint>
@@ -21,6 +22,7 @@
 #include "tusb.h"
 #include <PicoLed.hpp>
 
+//for MIDI status
 enum {
   BLINK_NOT_MOUNTED = 250,
   BLINK_MOUNTED = 1000,
@@ -36,6 +38,7 @@ enum {
 #define LED_PIN 9
 
 static const uint SHIFT_PIN = 2;
+//for key matric
 static const uint base_output = 16;
 static const uint base_input = 10;
 
@@ -73,7 +76,7 @@ static const uint8_t rwDisTrans[13] = {1, 1, 1, 2, 3, 3, 4, 4, 5, 7, 6, 9, 7};
 // another translation table bc i kinda screwed up ledTrans, don't even worry
 // about it
 static const uint8_t rwLEDCCW[12] = {9, 10, 11, 5, 4, 3, 2, 1, 0, 6, 7, 8};
-uint8_t rwKeys = 12; // how many keys the root wheel has
+uint8_t rwKeys = 12; // how many keys the root wheel has enabled
 // last index of rootwheel, so when baseFreq is changed,
 // rootFreq can be changed without pressing the rw button again
 uint8_t last_rw = 0;
@@ -82,12 +85,12 @@ float baseFreq = 261.626; // what is set by dial2
 float rootFreq = 261.626; // root of chord set by rootwheel
 uint8_t numKeys = 13;     // how many keys are active on right
 union {                   // union type my beloved
-  float f;                // this was necessary when using i2c
-  uint32_t num; // but on uart it probably just makes more sense to use stof
+  float f;                // so we can easily serialize
+  uint32_t num; 
 } ratio = {.f = 1.05946309436};
 uint16_t mask = 0x1FFF; // what bits are active for modmode
 
-int8_t channels[16] = {-1}; // each button on shaper is assigned a channel
+int8_t channels[16] = {-1}; // each button on shaper is assigned its own channel
 static const uint8_t volume = 127; // volume is changed in synth
 
 // for USB status
@@ -97,6 +100,11 @@ int miaMap(float input, int input_start, int input_end, int output_start,
            int output_end) {
   float slope = 1.0 * (output_end - output_start) / (input_end - input_start);
   return output_start + roundf(slope * (input - input_start));
+}
+// https://stackoverflow.com/a/25799431
+unsigned int rotl(unsigned int value, unsigned int shift, unsigned int width) {
+  return ((value << shift) & (UINT_MAX >> (sizeof(int) * CHAR_BIT - width))) |
+         (value >> (width - shift));
 }
 
 void matrix_task() {
@@ -155,16 +163,7 @@ void uart_setup() {
   uart_set_hw_flow(UART_ID, false, false);
 }
 
-/*void print_sysex(int len) {
-  if (len > 61)
-    return;
-  uint8_t msg[64];
-  msg[0] = 0b11110000;
-  msg[1] = 0b01010101;
-  memcpy(&msg[2], sendStr, len);
-  msg[len + 2] = 0b11110111;
-  tud_midi_stream_write(0, msg, len + 3);
-}*/
+
 
 // these is used instead of stol since substrings aren't null terminated
 // probably faster too, but eh
@@ -251,13 +250,16 @@ void read_right() {
 // this name is vague on purpose. sorry not sorry :3
 void write_right(uint8_t i) {
   uint8_t sendBuf[6];
-  if (i == dial2) {
+  if (i == dial2) { //using the dial enum was a mistake
     uint16_t roundBaseFreq = roundf(rootFreq);
     sprintf((char *)sendBuf, "!%04X@", roundBaseFreq);
     uart_write_blocking(UART_ID, sendBuf, 6);
   } else if (i == dial3) {
     sprintf((char *)sendBuf, "#%02X$", numKeys);
     uart_write_blocking(UART_ID, sendBuf, 4);
+  } else if (i == dial1) {
+    sprintf((char *)sendBuf, "(%04X)", mask);
+    uart_write_blocking(UART_ID, sendBuf, 6);
   }
 }
 
@@ -318,7 +320,7 @@ PicoLed::Color freqToColor(uint64_t freq) {
 
 float keyToFreq(uint8_t key) {
   return baseFreq *
-         pow(ratio.f, ((keyTranslation[key] * rwDisTrans[rwKeys]) % rwKeys));
+         pow(ratio.f, ((keyTranslation[key] * rwDisTrans[rwKeys]) % 12));
 }
 
 void write_led(auto strip) {
@@ -437,18 +439,35 @@ void change_freq(int rw_index) {
 void check_notes() {
   if (oldLeft != left) {
     for (int i = 0; i < 24; i++) {
+      //we (yes, WE) are interating through each bit pos, which represents each key
       bool oldbit = (oldLeft >> i) & 1;
       bool newbit = (left >> i) & 1;
+      //set RW midi to if the button is pressed. does anyone remember this feature?
       if (shift && (i == 20)) {
         rw_midi = newbit;
       }
+      //if a key has gone from off to on, and it isn't a disabled one from a smaller scale
       if (!oldbit && newbit && (keyTranslation[i] % 12 < rwKeys)) {
-        // print_sysex(sprintf(sendStr, "%d", i));
+        //if modMode, we need to shift the mask to match the same frequencies
+        if (modMode && (mask != 0x1FFF)) {
+          //find the difference in semitones using Math
+          //this would probably be faster just though the key indexs, since those are also by
+          //semitone, but the lookup tables are kinda spagetti at this point, so this is easier
+          int diff = roundf(rwKeys * log2(keyToFreq(last_rw) / keyToFreq(i)));
+          //rollover the shift since we only have shift left
+          if(diff < 0){
+            diff = numKeys - 1 + diff;
+          }
+          //circular shift with custom width
+          mask = rotl(mask, diff, numKeys - 1);
+          write_right(dial1);
+        }
         change_freq(i);
         if (rw_midi) {
           write_freq(rootFreq, 15);
         }
       }
+      //only matters for rw_midi
       if (oldbit && !newbit) {
         off_freq(15);
       }
@@ -463,8 +482,19 @@ void check_notes() {
         continue;
       }
       if (!oldBit & newBit) {
-        write_freq(rootFreq * pow(ratio.f, i), i);
-        continue;
+        if(shift){ //do we need to edit mask
+          //this disables the octave key in modmode since the shifting is weird otherwise
+          if(!modMode || (i < (numKeys-1))){
+            //if we have a full mask, clear it
+            if(mask == 0x1FFF >> (13 - numKeys)) mask = 0;
+            //set the bit and write it back
+            mask |= 1 << i;
+            write_right(dial1);
+          }
+        } else {
+          //otherwise, send the midi message
+          write_freq(rootFreq * pow(ratio.f, i), i);
+        }
       }
     }
   }
@@ -477,29 +507,30 @@ void check_analog() {
         // printf("Analog %d: %d\n", i, analog[i]);
         if (i == ctrl && ctrlMode)
           continue;
+        //send the new value as a CC message
         uint8_t msg[3];
         msg[0] = 0b10110000;
         msg[1] = i;
         msg[2] = analog[i];
         tud_midi_n_stream_write(0, 0, msg, 3);
       } else {
+        //this feature got scrapped
         ctrlMode = analog[fader1] > 64;
         // Scales 0-127 to 1-13
         numKeys = miaMap(analog[dial3], 0, 127, 2, 13);
-        // Simple LED mask for rn
+        // Reset LED mask to numKeys
         mask = 0x1FFF >> (13 - numKeys);
         // 16.0 is arbituary, corresponds to 128/16=8 semitones
         baseFreq = 261.626 / pow(ratio.f, analog[dial2] / 16.0);
-        change_freq(-1);
+        change_freq(-1); //remove if MIDI spam is too much
         // Scales 0-127 to 0-11
         rwKeys = miaMap(analog[dial1], 0, 127, 1, 12);
-        modMode = (analog[fader2] > 64) && (numKeys == rwKeys);
+        //Set modMode (notes on shaper follow frequency) only
+        //if both sided are in the same edo/tet
+        modMode = (analog[fader2] > 64) && ((numKeys-1) == rwKeys);
+        //the eleventh root of two is such a weird operation to be doing
         ratio.f = pow(2, 1.0 / (numKeys-1));
-        /*if (numKeys == 13) {
-          ratio.f = 1.05946309436;
-        } else {
-          ratio.f = pow(2, 1.0 / numKeys);
-        }*/
+        //these two dials effect the right, update it
         if (i == dial2 || i == dial3) {
           write_right(i);
         }
@@ -526,6 +557,7 @@ void led_blinking_task(void) {
 }
 
 int main() {
+  //not sure what board_init even does but like, it sounds good doesn't it?
   board_init();
   tud_init(0);
   uart_setup();
@@ -564,6 +596,8 @@ int main() {
     matrix_task();
     check_notes();
 
+    //Receive any packets sent to avoid filling buffer
+    //not sure if necessary but eh
     uint8_t packet[4];
     while (tud_midi_available())
       tud_midi_packet_read(packet);
